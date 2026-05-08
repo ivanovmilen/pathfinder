@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Redis Enterprise Upgrade Pathfinder</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="page-shell">
+      <section class="hero">
+        <img
+          class="hero-logo"
+          src="./assets/images/SVG/Redis_Logo_White_RGB.svg"
+          alt="Redis"
+        />
+        <p class="eyebrow">Redis Enterprise upgrade assistant</p>
+        <h1>Plan and review your Redis Enterprise upgrade</h1>
+      </section>
+
+      <section class="card controls-card" aria-labelledby="landing-title">
+        <div class="card-heading">
+          <h2 id="landing-title">Select your deployment type</h2>
+        </div>
+
+        <div class="landing-options" role="radiogroup" aria-labelledby="landing-title">
+          <label class="landing-option">
+            <input type="radio" name="deployment-type" value="redis-software" checked />
+            <span class="landing-option-body">
+              <span class="landing-option-title">Redis Software</span>
+              <span class="landing-option-description">Deployed on virtual machines or bare-metal servers</span>
+            </span>
+          </label>
+          <label class="landing-option">
+            <input type="radio" name="deployment-type" value="kubernetes" />
+            <span class="landing-option-body">
+              <span class="landing-option-title">Kubernetes</span>
+              <span class="landing-option-description">Deployed via the Redis Enterprise Kubernetes operator</span>
+            </span>
+          </label>
+        </div>
+
+        <div class="form-actions" style="margin-top: 1.5rem;">
+          <button id="continue-button" class="primary-button" type="button">Continue →</button>
+        </div>
+      </section>
+    </main>
+
+    <script>
+      document.getElementById('continue-button').addEventListener('click', function () {
+        const selected = document.querySelector('input[name="deployment-type"]:checked');
+        if (!selected) return;
+        sessionStorage.removeItem('pathfinder_selections');
+        window.location.href = selected.value === 'kubernetes' ? 'kubernetes.html' : 'redis-software.html';
+      });
+    </script>
+  </body>
+</html>

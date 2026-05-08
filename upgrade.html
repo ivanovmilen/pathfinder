@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Upgrade Guide · Redis Enterprise Upgrade Guide</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="page-shell">
+      <section class="hero">
+        <img
+          class="hero-logo"
+          src="./assets/images/SVG/Redis_Logo_White_RGB.svg"
+          alt="Redis"
+        />
+        <p class="eyebrow">Redis Enterprise upgrade assistant</p>
+        <h1>Upgrade guide</h1>
+      </section>
+
+      <section class="results-view">
+        <section class="card results-hero" aria-labelledby="upgrade-title">
+          <div>
+            <p class="eyebrow results-eyebrow">Step-by-step instructions</p>
+            <h1 id="upgrade-title">Upgrade guide</h1>
+            <p class="status-copy results-intro">
+              Follow each step below to complete the Redis Enterprise upgrade.
+            </p>
+          </div>
+          <div class="results-actions">
+            <button id="back-to-results" class="secondary-button" type="button">← Back to results</button>
+          </div>
+        </section>
+
+        <section class="card results-summary-card" aria-labelledby="upgrade-summary-title">
+          <div class="card-heading">
+            <h2 id="upgrade-summary-title">Selected inputs</h2>
+          </div>
+          <div id="upgrade-summary" class="results-summary"></div>
+        </section>
+
+        <section id="path-selection" class="card" hidden>
+          <div class="card-heading">
+            <h2 id="path-selection-title">Select upgrade path</h2>
+          </div>
+          <div id="path-selection-content" class="path-selection-content"></div>
+          <div class="path-selection-actions">
+            <button id="path-selection-confirm" class="primary-button" type="button">Continue with selected path →</button>
+          </div>
+        </section>
+
+        <section id="wizard" class="wizard" hidden>
+          <div class="wizard-progress">
+            <span id="wizard-step-indicator" class="wizard-step-indicator"></span>
+            <div id="wizard-step-dots" class="wizard-step-dots"></div>
+          </div>
+          <div id="wizard-step-content" class="wizard-step-content"></div>
+          <div class="wizard-nav">
+            <button id="wizard-prev" class="secondary-button wizard-nav-button" type="button">← Previous</button>
+            <button id="wizard-next" class="primary-button wizard-nav-button" type="button">Next →</button>
+          </div>
+        </section>
+      </section>
+    </main>
+
+    <script type="module" src="upgrade.js"></script>
+  </body>
+</html>
+

@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Upgrade Guidance · Redis Enterprise Upgrade Guide</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="page-shell">
+      <section class="hero">
+        <img
+          class="hero-logo"
+          src="./assets/images/SVG/Redis_Logo_White_RGB.svg"
+          alt="Redis"
+        />
+        <p class="eyebrow">Redis Enterprise upgrade assistant</p>
+        <h1>Plan and review your Redis Enterprise upgrade</h1>
+      </section>
+
+      <section class="results-view">
+        <section class="card results-hero" aria-labelledby="results-title">
+          <div>
+            <p class="eyebrow results-eyebrow">Upgrade guidance</p>
+            <h1 id="results-title">Review your upgrade path</h1>
+            <p class="status-copy results-intro">
+              Generated recommendation for the selected Redis Enterprise environment.
+            </p>
+          </div>
+          <div class="results-actions">
+            <button id="edit-selections" class="secondary-button" type="button">Edit selections</button>
+          </div>
+        </section>
+
+        <section class="card results-summary-card" aria-labelledby="results-summary-title">
+          <div class="card-heading">
+            <h2 id="results-summary-title">Selected inputs</h2>
+          </div>
+          <div id="results-summary" class="results-summary"></div>
+        </section>
+
+        <section id="os-upgrade-note" class="warning-panel" hidden>
+          <p class="status-copy">
+            <strong>Note:</strong> An OS upgrade may be required if your current operating system
+            is not supported by the target Redis Enterprise version. Before starting the upgrade,
+            verify OS compatibility using the
+            <a href="https://redis.io/docs/latest/operate/rs/installing-upgrading/install/plan-deployment/supported-platforms/"
+               target="_blank" rel="noreferrer">Supported platforms — Redis docs</a>.
+          </p>
+        </section>
+
+        <section id="guide-output" class="guide-output" aria-live="polite"></section>
+
+        <section id="process-summary" class="guide-panel process-summary" aria-labelledby="process-summary-title" hidden></section>
+
+        <section id="migration-reference" class="wizard-step-ref" hidden>
+          <h4>Reference</h4>
+          <a href="https://redis.io/docs/latest/operate/rs/databases/import-export/replica-of/" target="_blank" rel="noreferrer">
+            Replica Of — Redis docs
+          </a>
+          <a href="https://redis.github.io/riotx/index.html" target="_blank" rel="noreferrer">
+            RIOT-X — GitHub
+          </a>
+        </section>
+
+        <div id="start-upgrade-guide-wrapper" class="start-upgrade-guide-wrapper" hidden>
+          <button id="start-upgrade-guide" class="primary-button start-upgrade-guide-button" type="button">Start upgrade guide →</button>
+        </div>
+      </section>
+    </main>
+
+    <script type="module" src="results.js"></script>
+  </body>
+</html>
+

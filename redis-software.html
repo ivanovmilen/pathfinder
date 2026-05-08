@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Redis Software Upgrade · Redis Enterprise Upgrade Pathfinder</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body data-page-type="redis-software">
+    <main class="page-shell">
+      <section id="form-view" class="view-stack">
+        <section class="hero">
+          <img
+            class="hero-logo"
+            src="./assets/images/SVG/Redis_Logo_White_RGB.svg"
+            alt="Redis"
+          />
+          <p class="eyebrow">Redis Enterprise upgrade assistant</p>
+          <h1>Plan and review your Redis Enterprise upgrade</h1>
+        </section>
+
+        <section class="card controls-card" aria-labelledby="controls-title">
+          <div class="card-heading">
+            <a href="index.html" class="secondary-button">← Back</a>
+            <h2 id="controls-title">Deployment selections</h2>
+          </div>
+
+          <form class="controls-grid" aria-label="Upgrade selections">
+          <div class="field field-with-help">
+            <div class="field-label-row">
+              <label for="source-version" class="field-label">Current version</label>
+              <button
+                type="button"
+                class="field-help-toggle"
+                aria-label="How to find the current cluster version"
+                aria-controls="source-version-help"
+                aria-expanded="false"
+              >
+                i
+              </button>
+            </div>
+            <select id="source-version"></select>
+            <aside id="source-version-help" class="field-help-panel" hidden>
+              Check the current cluster version with <a href="https://redis.io/docs/latest/operate/rs/references/cli-utilities/rladmin/status/" target="_blank" rel="noreferrer">rladmin status</a> or <a href="https://redis.io/docs/latest/operate/rs/references/rest-api/" target="_blank" rel="noreferrer">REST API</a>
+              <code class="field-command">curl -k -u &lt;user&gt;:&lt;password&gt; https://&lt;cluster-host&gt;:9443/v1/nodes | jq -r '.[0].software_version'</code>
+              <span class="field-example">Example returned software_version: 7.22.2-41</span>
+            </aside>
+          </div>
+
+          <div class="field field-with-help">
+            <div class="field-label-row">
+              <label for="target-version" class="field-label">Target version</label>
+              <button
+                type="button"
+                class="field-help-toggle"
+                aria-label="How to choose the target cluster version"
+                aria-controls="target-version-help"
+                aria-expanded="false"
+              >
+                i
+              </button>
+            </div>
+            <select id="target-version"></select>
+            <aside id="target-version-help" class="field-help-panel" hidden>
+              Check <a href="https://redis.io/docs/latest/operate/rs/release-notes/" target="_blank" rel="noreferrer">Redis Enterprise release notes</a> for the version you plan to upgrade to so you can review version-specific changes and upgrade considerations
+            </aside>
+          </div>
+
+          <div class="field field-with-help">
+            <div class="field-label-row">
+              <label for="database-version" class="field-label">Current database version</label>
+              <button
+                type="button"
+                class="field-help-toggle"
+                aria-label="How to choose the current database version"
+                aria-controls="database-version-help"
+                aria-expanded="false"
+              >
+                i
+              </button>
+            </div>
+            <select id="database-version"></select>
+            <aside id="database-version-help" class="field-help-panel field-help-panel-wide" hidden>
+              Check the current database version with <a href="https://redis.io/docs/latest/operate/rs/references/cli-utilities/rladmin/status/" target="_blank" rel="noreferrer">rladmin status extra all</a> or <a href="https://redis.io/docs/latest/operate/rs/references/rest-api/" target="_blank" rel="noreferrer">REST API</a>
+              <code class="field-command">curl -k -u &lt;user&gt;:&lt;password&gt; https://&lt;cluster-host&gt;:9443/v1/bdbs | jq '.[] | {name, uid, redis_version}'</code>
+              <span class="field-example">Example returned redis_version: 7.4.3</span>
+            </aside>
+            <div class="active-active-row">
+              <label class="active-active-label">
+                <input type="checkbox" id="active-active" />
+                Active-Active (CRDB)
+              </label>
+              <button
+                type="button"
+                class="field-help-toggle"
+                aria-label="What is Active-Active (CRDB)"
+                aria-controls="active-active-help"
+                aria-expanded="false"
+              >
+                i
+              </button>
+            </div>
+            <aside id="active-active-help" class="field-help-panel field-help-panel-wide" hidden>
+              <span>Active-Active databases, also known as CRDB (Conflict-free Replicated Databases), replicate data across multiple Redis Enterprise clusters in different geographic locations. Each participating cluster holds a full copy of the data and can accept both read and write operations locally.</span>
+              <span>Upgrading an Active-Active deployment requires a dedicated procedure that coordinates the upgrade across all participating clusters. All clusters must be upgraded to the target Redis Enterprise version before the CRDB configuration itself is upgraded.</span>
+            </aside>
+          </div>
+
+          <div id="os-field" class="field field-with-help">
+            <div class="field-label-row">
+              <label for="operating-system" class="field-label">Operating system</label>
+              <button
+                type="button"
+                class="field-help-toggle"
+                aria-label="How to find the operating system version"
+                aria-controls="operating-system-help"
+                aria-expanded="false"
+              >
+                i
+              </button>
+            </div>
+            <select id="operating-system"></select>
+            <aside id="operating-system-help" class="field-help-panel" hidden>
+              <span>Check the OS version by running <code>cat /etc/os-release</code></span>
+              <span aria-hidden="true">&nbsp;</span>
+              <span>Example output:</span>
+              <span class="field-example">NAME="Ubuntu"</span>
+              <span class="field-example">VERSION="22.04.4 LTS (Jammy Jellyfish)"</span>
+              <span class="field-example">VERSION_ID="22.04"</span>
+            </aside>
+          </div>
+
+          <div class="field field-with-help">
+            <div class="field-label-row">
+              <span id="installed-modules-label" class="field-label">Installed modules</span>
+              <button
+                type="button"
+                class="field-help-toggle"
+                aria-label="How to find installed modules"
+                aria-controls="installed-modules-help"
+                aria-expanded="false"
+              >
+                i
+              </button>
+            </div>
+            <div
+              id="installed-modules"
+              class="module-selector"
+              role="group"
+              aria-labelledby="installed-modules-label"
+              aria-disabled="true"
+            ></div>
+            <aside id="installed-modules-help" class="field-help-panel field-help-panel-wide" hidden>
+              Check installed modules with <a href="https://redis.io/docs/latest/operate/rs/references/rest-api/" target="_blank" rel="noreferrer">REST API</a>
+              <code class="field-command">curl -k -u &lt;user&gt;:&lt;password&gt; https://&lt;cluster-host&gt;:9443/v1/bdbs | jq '.[] | {name, uid, redis_version, module_list}'</code>
+            </aside>
+          </div>
+
+            <div class="form-actions">
+              <button id="update-guide" class="primary-button" type="button">Check Upgrade Path</button>
+            </div>
+          </form>
+        </section>
+
+        <section id="form-output" class="guide-output" aria-live="polite"></section>
+      </section>
+    </main>
+
+    <script type="module" src="app.js"></script>
+  </body>
+</html>
+
+
