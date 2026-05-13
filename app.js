@@ -1,11 +1,13 @@
 import {
   OPTIONS,
+  escapeHtml,
   getDatabaseCompatibility,
   getDatabaseVersionFamily,
   getDatabaseVersionFamilyLabel,
   getModuleOptionsForFeatureSet,
   getSupportedK8sVersions,
   getSupportedOperatingSystemOptions,
+  isK8sPlatform,
 } from './upgrade-data.js';
 
 // Detect which form page is active so app.js can configure itself accordingly.
@@ -62,15 +64,6 @@ const FIELD_LABELS = {
 };
 
 
-
-function escapeHtml(value) {
-  return String(value)
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&#39;');
-}
 
 function populateSelect(select, options, selectedValue, placeholderLabel) {
   select.innerHTML = '';
@@ -563,7 +556,7 @@ function restoreFormFromStorage() {
           formControls.k8sVersion.value = selections.k8sVersion;
         }
       }
-    } else if (selections.platform.startsWith('kubernetes-')) {
+    } else if (isK8sPlatform(selections.platform)) {
       // Two-level restore on redis-software page: set platform to 'kubernetes',
       // then restore the specific distribution.
       if (formControls.platform) {
@@ -585,7 +578,7 @@ function restoreFormFromStorage() {
     }
   }
 
-  if (selections.operatingSystem && !selections.platform?.startsWith('kubernetes-')) {
+  if (selections.operatingSystem && !isK8sPlatform(selections.platform)) {
     if (formControls.operatingSystem) {
       formControls.operatingSystem.value = selections.operatingSystem;
     }

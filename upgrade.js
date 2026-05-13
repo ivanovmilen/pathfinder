@@ -4,16 +4,21 @@ import {
   OS_UPGRADE_DOC_URL,
   OPERATOR_K8S_COMPATIBILITY,
   SUPPORTED_OPERATOR_VERSIONS,
+  escapeHtml,
   getClusterVersionFamily,
   getOperatorVersionsForK8s,
   getCompatibleModuleVersions,
+  getDatabaseUpgradeRequirement,
+  getDatabaseVersionFamily,
   getDatabaseVersionFamilyLabel,
   getClusterVersionLabel,
   getModuleEntries,
   getModuleLabel,
   getModuleSelectionSummary,
   getPlatformSupport,
+  getRecommendedTargetDatabaseFamily,
   getSupportedOperatingSystemOptions,
+  isK8sPlatform,
 } from './upgrade-data.js';
 
 const upgradeSummary = document.querySelector('#upgrade-summary');
@@ -31,15 +36,6 @@ const wizardPrevButton = document.querySelector('#wizard-prev');
 const wizardNextButton = document.querySelector('#wizard-next');
 
 const STORAGE_KEY = 'pathfinder_selections';
-
-function escapeHtml(value) {
-  return String(value)
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&#39;');
-}
 
 function labelForPlatform(value) {
   if (value === 'vms' || value === 'bare-metal') return 'VMs and Bare Metal';
@@ -120,13 +116,13 @@ function renderUpgradeSummary(selections) {
         <dt>Deployment platform</dt>
         <dd>${escapeHtml(labelForPlatform(selections.platform))}</dd>
       </div>
-      ${selections.platform.startsWith('kubernetes-') && selections.k8sVersion ? `
+      ${isK8sPlatform(selections.platform) && selections.k8sVersion ? `
       <div>
         <dt>${selections.platform === 'kubernetes-openshift' ? 'OpenShift version' : 'Kubernetes version'}</dt>
         <dd>${escapeHtml(selections.k8sVersion)}</dd>
       </div>
       ` : ''}
-      ${selections.platform.startsWith('kubernetes-') ? '' : `
+      ${isK8sPlatform(selections.platform) ? '' : `
       <div>
         <dt>Operating system</dt>
         <dd>${escapeHtml(labelForOperatingSystem(selections.operatingSystem))}</dd>
@@ -178,10 +174,7 @@ function buildPreUpgradeStep(selections) {
   // Both use the "newest operator in the family" rule: warn when the selected K8s
   // version is not in the newest patch's compatibility list for that family.
   let k8sVersionWarningHtml = '';
-  if (
-    (selections.platform === 'kubernetes-community' || selections.platform === 'kubernetes-openshift' || selections.platform === 'kubernetes-eks' || selections.platform === 'kubernetes-rancher' || selections.platform === 'kubernetes-gke' || selections.platform === 'kubernetes-aks') &&
-    selections.k8sVersion
-  ) {
+  if (isK8sPlatform(selections.platform) && selections.k8sVersion) {
     const k8sVersionLabel = selections.platform === 'kubernetes-openshift' ? 'OpenShift version' : 'Kubernetes version';
 
     // --- Source-family check ---
@@ -286,11 +279,9 @@ function buildPreUpgradeStep(selections) {
       <section class="wizard-step-ref">
         <h4>Reference</h4>
         <a href="${escapeHtml(
-          (selections.platform === 'kubernetes-community' || selections.platform === 'kubernetes-openshift' || selections.platform === 'kubernetes-eks' || selections.platform === 'kubernetes-rancher' || selections.platform === 'kubernetes-gke' || selections.platform === 'kubernetes-aks')
-            ? K8S_UPGRADE_DOC_URL
-            : CLUSTER_UPGRADE_DOC_URL
+          isK8sPlatform(selections.platform) ? K8S_UPGRADE_DOC_URL : CLUSTER_UPGRADE_DOC_URL
         )}" target="_blank" rel="noreferrer">
-          ${(selections.platform === 'kubernetes-community' || selections.platform === 'kubernetes-openshift' || selections.platform === 'kubernetes-eks' || selections.platform === 'kubernetes-rancher' || selections.platform === 'kubernetes-gke' || selections.platform === 'kubernetes-aks')
+          ${isK8sPlatform(selections.platform)
             ? 'Upgrade Redis Enterprise for Kubernetes — Redis docs'
             : 'Upgrade a Redis Enterprise cluster — Redis docs'}
         </a>
@@ -586,119 +577,16 @@ function buildDatabaseUpgradeStep(selections) {
     ? buildModuleVersionListHtml(selections.targetVersion, moduleNames)
     : '';
 
-  const isK8s = selections.platform === 'kubernetes-community' || selections.platform === 'kubernetes-openshift';
+  // Note: this function is the non-K8s database step. Kubernetes upgrades are
+  // routed to buildK8sDatabaseUpgradeStep by buildWizardSteps, so a K8s branch
+  // here would be unreachable.
 
-  if (isK8s) {
-    if (selections.activeActive) {
-      return {
-        title: 'Upgrade Active-Active databases',
-        html: `
-          <p class="status-copy">
-            After all participating clusters are upgraded to
-            <strong>${escapeHtml(targetLabel)}</strong>, upgrade your
-            <strong>RedisEnterpriseActiveActiveDatabase (REAADB)</strong> custom resources.
-            You only need to apply the change on <strong>one</strong> participating cluster —
-            it propagates automatically to all others. All participating clusters must be running
-            operator version 8.0.2-2 or later.
-          </p>
-          <ol class="wizard-step-list">
-            <li>
-              <strong>Verify all participating clusters are upgraded</strong> — Confirm that every
-              participating cluster's REC state is <strong>Running</strong>:
-              <pre><code>kubectl get rec</code></pre>
-            </li>
-            <li>
-              <strong>Edit the REAADB custom resource on one participating cluster</strong> — Set
-              <code>spec.redisVersion</code> to the desired Redis database version string (e.g.
-              <code>"7.2"</code>, <code>"7.4"</code>, <code>"8.0"</code>, or
-              <code>"8.2"</code>):
-              <pre><code>kubectl edit reaadb &lt;your-reaadb-name&gt;</code></pre>
-              Under <code>spec</code>, set:
-              <pre><code>spec:
-  redisVersion: "8.2"</code></pre>
-            </li>
-            <li>
-              <strong>Keep existing module versions unchanged (if applicable)</strong> — If your
-              REAADB uses supported (bundled) modules, do not change the <code>moduleList</code>
-              version numbers when upgrading <code>redisVersion</code>. The database will
-              automatically use the module versions bundled with the new Redis version.
-            </li>
-            <li>
-              <strong>Apply the change:</strong>
-              <pre><code>kubectl apply -f &lt;reaadb-name&gt;.yaml</code></pre>
-              The operator propagates the version change to all other participating clusters
-              automatically.
-            </li>
-            <li>
-              <strong>Monitor the upgrade</strong> — Watch the REAADB status across participating
-              clusters to confirm the new Redis version is active:
-              <pre><code>kubectl get reaadb &lt;your-reaadb-name&gt;</code></pre>
-            </li>
-          </ol>
-          <section class="wizard-step-ref">
-            <h4>Reference</h4>
-            <a href="${escapeHtml(K8S_DB_UPGRADE_DOC_URL)}" target="_blank" rel="noreferrer">
-              Upgrade databases (Kubernetes) — Redis docs
-            </a>
-          </section>
-        `,
-      };
-    }
-
-    return {
-      title: 'Upgrade the database',
-      html: `
-        <p class="status-copy">
-          After the Redis Enterprise cluster (REC) upgrade is complete and the REC state is
-          <strong>Running</strong>, upgrade your
-          <strong>RedisEnterpriseDatabase (REDB)</strong> custom resources to
-          <strong>${escapeHtml(targetLabel)}</strong>.
-        </p>
-        <ol class="wizard-step-list">
-          <li>
-            <strong>Verify the REC upgrade is complete</strong> — Confirm the cluster state is
-            <strong>Running</strong> before upgrading any databases:
-            <pre><code>kubectl get rec</code></pre>
-          </li>
-          <li>
-            <strong>Edit the REDB custom resource</strong> — Set <code>spec.redisVersion</code>
-            to the desired Redis database version string (e.g. <code>"7.2"</code>,
-            <code>"7.4"</code>, <code>"8.0"</code>, or <code>"8.2"</code> — note: this is a
-            string value):
-            <pre><code>kubectl edit redb &lt;your-redb-name&gt;</code></pre>
-            Under <code>spec</code>, set:
-            <pre><code>spec:
-  redisVersion: "8.2"</code></pre>
-          </li>
-          <li>
-            <strong>Apply the change:</strong>
-            <pre><code>kubectl apply -f &lt;redb-name&gt;.yaml</code></pre>
-          </li>
-          <li>
-            <strong>Monitor the upgrade</strong> — Watch the REDB status to confirm the database
-            is running the new Redis version:
-            <pre><code>kubectl get redb &lt;your-redb-name&gt;</code></pre>
-          </li>
-          <li>
-            <strong>Verify the upgrade policy</strong> — If your cluster
-            <code>redisUpgradePolicy</code> or database <code>redisVersion</code> is set to
-            <code>major</code>, minor version upgrades will be blocked. See the Redis upgrade
-            policy documentation for details.
-          </li>
-          <li>
-            <strong>Test application connectivity</strong> — Test read and write operations to
-            confirm that applications are functioning correctly.
-          </li>
-        </ol>
-        <section class="wizard-step-ref">
-          <h4>Reference</h4>
-          <a href="${escapeHtml(K8S_DB_UPGRADE_DOC_URL)}" target="_blank" rel="noreferrer">
-            Upgrade databases (Kubernetes) — Redis docs
-          </a>
-        </section>
-      `,
-    };
-  }
+  const currentDbFamily = getDatabaseVersionFamily(selections.databaseVersion);
+  const currentDbLabel = getDatabaseVersionFamilyLabel(currentDbFamily);
+  const dbReq = getDatabaseUpgradeRequirement(currentDbFamily, selections.targetVersion);
+  const recommendedDbLabel = dbReq.recommended
+    ? getDatabaseVersionFamilyLabel(dbReq.recommended)
+    : '';
 
   if (selections.activeActive) {
     return {
@@ -803,12 +691,29 @@ function buildDatabaseUpgradeStep(selections) {
     };
   }
 
+  const dbIntroHtml = dbReq.status === 'required'
+    ? `<p class="status-copy">Your current database family
+        <strong>${escapeHtml(currentDbLabel)}</strong> is not bundled with
+        <strong>${escapeHtml(targetLabel)}</strong>. A database upgrade is
+        <strong>required</strong> as part of this step. The latest bundled family is
+        <strong>${escapeHtml(recommendedDbLabel)}</strong>.</p>`
+    : dbReq.status === 'recommended'
+      ? `<p class="status-copy"><strong>Recommended:</strong> upgrade the database to family
+          <strong>${escapeHtml(recommendedDbLabel)}</strong> once the cluster upgrade to
+          <strong>${escapeHtml(targetLabel)}</strong> is complete and healthy. Your existing
+          family <strong>${escapeHtml(currentDbLabel)}</strong> will keep running on the new
+          cluster, but Redis recommends moving to the latest bundled family for new features,
+          performance improvements, and updated module versions.</p>`
+      : `<p class="status-copy">Your current database family
+          <strong>${escapeHtml(currentDbLabel)}</strong> already matches the latest bundled family
+          for <strong>${escapeHtml(targetLabel)}</strong>. No database version change is required.</p>`;
+
+  const rladminRedisVersion = dbReq.recommended || '&lt;version&gt;';
+
   return {
     title: 'Upgrade the database',
     html: `
-      <p class="status-copy">After all cluster nodes are running
-        <strong>${escapeHtml(targetLabel)}</strong>, upgrade each database to the latest
-        bundled Redis database version.</p>
+      ${dbIntroHtml}
       <ol class="wizard-step-list">
         <li>
           <strong>Understand the default upgrade behavior</strong> — When you upgrade an existing
@@ -874,8 +779,9 @@ function buildDatabaseUpgradeStep(selections) {
           shard placement, and prevent the cluster from becoming unbalanced:
           <pre><code>rladmin upgrade db &lt;database name | database ID&gt; preserve_roles</code></pre>
           To upgrade the database to a version other than the default version, use the
-          <code>redis_version</code> parameter:
-          <pre><code>rladmin upgrade db &lt;database name | database ID&gt; redis_version &lt;version&gt; preserve_roles</code></pre>
+          <code>redis_version</code> parameter (recommended target family
+          <strong>${escapeHtml(recommendedDbLabel || 'latest bundled')}</strong>):
+          <pre><code>rladmin upgrade db &lt;database name | database ID&gt; redis_version ${escapeHtml(rladminRedisVersion)} preserve_roles</code></pre>
         </li>
         ${hasModules ? `
         <li>
@@ -1011,7 +917,7 @@ function getK8sDeploymentMethod(platform) {
 function buildK8sClusterUpgradeHtml(sourceLabel, targetLabel, method, platform, sourceVersion, targetVersion, k8sVersion) {
   const methodLabel = K8S_DEPLOYMENT_METHODS.find((m) => m.value === method)?.label ?? method;
 
-  const isRelevantPlatform = platform === 'kubernetes-community' || platform === 'kubernetes-openshift' || platform === 'kubernetes-eks' || platform === 'kubernetes-rancher' || platform === 'kubernetes-gke' || platform === 'kubernetes-aks';
+  const isRelevantPlatform = isK8sPlatform(platform);
 
   const filteredOperatorVersions = isRelevantPlatform
     ? getOperatorVersionsForK8s(sourceVersion, k8sVersion, platform)
@@ -1216,10 +1122,39 @@ function buildK8sDatabaseUpgradeStep(selections) {
     ? buildModuleVersionListHtml(selections.targetVersion, moduleNames)
     : '';
 
+  const currentDbFamily = getDatabaseVersionFamily(selections.databaseVersion);
+  const currentDbLabel = getDatabaseVersionFamilyLabel(currentDbFamily);
+  const dbReq = getDatabaseUpgradeRequirement(currentDbFamily, selections.targetVersion);
+  const recommendedDbFamily = dbReq.recommended || getRecommendedTargetDatabaseFamily(selections.targetVersion);
+  const recommendedDbLabel = recommendedDbFamily
+    ? getDatabaseVersionFamilyLabel(recommendedDbFamily)
+    : '';
+  // Value to embed inside the kubectl patch JSON. Keep the placeholder when no
+  // recommendation is available rather than emitting an empty string.
+  const redisVersionLiteral = recommendedDbFamily || '&lt;target-redis-version&gt;';
+
+  const dbStatusIntroHtml = dbReq.status === 'required'
+    ? `<p class="status-copy">Current database family
+        <strong>${escapeHtml(currentDbLabel)}</strong> is not bundled with
+        <strong>${escapeHtml(targetLabel)}</strong>. Upgrade is <strong>required</strong>;
+        the recommended target family is
+        <strong>${escapeHtml(recommendedDbLabel)}</strong>.</p>`
+    : dbReq.status === 'recommended'
+      ? `<p class="status-copy"><strong>Recommended:</strong> after the REC reaches
+          <strong>${escapeHtml(targetLabel)}</strong> and shows <code>Running</code>, update each
+          REDB's <code>spec.redisVersion</code> to family
+          <strong>${escapeHtml(recommendedDbLabel)}</strong>. The existing family
+          <strong>${escapeHtml(currentDbLabel)}</strong> keeps working, but Redis recommends
+          moving to the latest bundled family for new features and updated module versions.</p>`
+      : `<p class="status-copy">Current database family
+          <strong>${escapeHtml(currentDbLabel)}</strong> already matches the latest bundled family for
+          <strong>${escapeHtml(targetLabel)}</strong>. No <code>redisVersion</code> change is required.</p>`;
+
   if (selections.activeActive) {
     return {
       title: 'Upgrade Active-Active databases (Kubernetes)',
       html: `
+        ${dbStatusIntroHtml}
         <p class="status-copy">This deployment uses Active-Active (CRDB) databases on Kubernetes.
           After the operator and cluster are upgraded, update each Active-Active database's custom
           resource.</p>
@@ -1232,9 +1167,10 @@ function buildK8sDatabaseUpgradeStep(selections) {
           </li>
           <li>
             <strong>Update the RedisEnterpriseActiveActiveDatabase (REAADB) resource</strong> — Edit
-            each REAADB custom resource to set the target Redis database version:
+            each REAADB custom resource to set <code>spec.redisVersion</code> to the recommended
+            family <strong>${escapeHtml(recommendedDbLabel || 'latest bundled')}</strong>:
             <pre><code>kubectl patch reaadb &lt;reaadb-name&gt; -n &lt;namespace&gt; --type merge -p \\
-  '{"spec":{"redisVersion":"&lt;target-redis-version&gt;"}}'</code></pre>
+  '{"spec":{"redisVersion":"${escapeHtml(redisVersionLiteral)}"}}'</code></pre>
             The operator will coordinate the upgrade across all participating clusters.
           </li>
           ${hasModules ? `
@@ -1275,6 +1211,7 @@ function buildK8sDatabaseUpgradeStep(selections) {
   return {
     title: 'Upgrade the database',
     html: `
+      ${dbStatusIntroHtml}
       <p class="status-copy">After the Redis Enterprise cluster is running
         <strong>${escapeHtml(targetLabel)}</strong>, upgrade each database by updating its
         <code>RedisEnterpriseDatabase</code> (REDB) custom resource.</p>
@@ -1285,10 +1222,11 @@ function buildK8sDatabaseUpgradeStep(selections) {
           <pre><code>kubectl get redb -n &lt;namespace&gt;</code></pre>
         </li>
         <li>
-          <strong>Update the REDB custom resource</strong> — For each database, update the
-          <code>redisVersion</code> field in the REDB spec to the target Redis database version:
+          <strong>Update the REDB custom resource</strong> — For each database, set
+          <code>spec.redisVersion</code> to the recommended target family
+          <strong>${escapeHtml(recommendedDbLabel || 'latest bundled')}</strong>:
           <pre><code>kubectl patch redb &lt;redb-name&gt; -n &lt;namespace&gt; --type merge -p \\
-  '{"spec":{"redisVersion":"&lt;target-redis-version&gt;"}}'</code></pre>
+  '{"spec":{"redisVersion":"${escapeHtml(redisVersionLiteral)}"}}'</code></pre>
           The operator will perform a rolling restart of the database shards.
         </li>
         ${hasModules ? `
@@ -1338,7 +1276,7 @@ function buildWizardSteps(selections, selectedPath) {
   // selectedPath is an array of version strings, e.g. ['6.4', '7.4', '8.0.16']
   const versionStops = selectedPath || [selections.sourceVersion, selections.targetVersion];
   const isMultiStep = versionStops.length > 2;
-  const isK8s = selections.platform.startsWith('kubernetes-');
+  const isK8s = isK8sPlatform(selections.platform);
 
   // Pre-upgrade checks apply to the overall upgrade journey
   const steps = [buildPreUpgradeStep(selections)];

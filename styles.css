@@ -560,6 +560,34 @@ code {
   line-height: 1.6;
 }
 
+.process-summary-steps {
+  margin: 1rem 0 0;
+  padding-left: 2.25rem;
+  font-size: 1.05rem;
+  line-height: 1.6;
+  color: var(--text);
+  list-style: decimal;
+}
+
+.process-summary-steps li {
+  margin-bottom: 0.6rem;
+  padding-left: 0.35rem;
+}
+
+.process-summary-steps li:last-child {
+  margin-bottom: 0;
+}
+
+.process-summary-steps li::marker {
+  color: var(--accent-strong);
+  font-weight: 600;
+}
+
+.process-summary-steps strong {
+  color: var(--accent-strong);
+  font-weight: 600;
+}
+
 .guide-section {
   padding: 1.1rem 1rem;
 }
