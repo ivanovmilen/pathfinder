@@ -14,6 +14,7 @@ import {
   getModuleSelectionSummary,
   getModulesForDatabaseFamily,
   getPlatformSupport,
+  getPreClusterUpgradeDatabaseFamily,
   getSupportedOperatingSystemOptions,
   isK8sPlatform,
 } from './upgrade-data.js';
@@ -137,15 +138,29 @@ function renderProcessSummary(selections, upgradePaths, osUpgradeRequired, isDir
   // upgrades until a hop's target cluster no longer bundles the current family,
   // then jump to that hop's latest bundled family and ride it forward.
   let runningDbFamily = getDatabaseVersionFamily(selections.databaseVersion);
-  let dbEverRequired = false;
-  let dbEverRecommended = false;
-  let lastRecommendedDb = runningDbFamily;
 
   for (let i = 1; i < previewPath.length; i++) {
     const stepSource = previewPath[i - 1];
     const stepTarget = previewPath[i];
     const isBridgeHop = isMultiStep && i < finalIdx;
     const targetVersionLabel = escapeHtml(getClusterVersionLabel(stepTarget));
+
+    // Pre-cluster DB upgrade: when the current DB family isn't bundled with
+    // the target cluster, the user MUST upgrade the DB before the cluster step.
+    // That upgrade happens on the *source* cluster, so the new DB family has
+    // to be supported by both source and target — pick the highest family
+    // satisfying both. Falls back to the target's latest if no intersection
+    // exists (shouldn't happen with current data, but keeps the summary
+    // populated rather than silently dropping the step).
+    const dbReq = getDatabaseUpgradeRequirement(runningDbFamily, stepTarget);
+    if (dbReq.status === 'required') {
+      const preClusterFamily = getPreClusterUpgradeDatabaseFamily(stepSource, stepTarget, runningDbFamily)
+        || dbReq.recommended;
+      const requiredLabel = escapeHtml(getDatabaseVersionFamilyLabel(preClusterFamily));
+      const moduleSuffix = formatModuleSuffix(preClusterFamily, moduleNames, hasModules);
+      steps.push(`Database upgrade required (to <strong>${requiredLabel}</strong>)${moduleSuffix}`);
+      runningDbFamily = preClusterFamily;
+    }
 
     // Kubernetes platforms upgrade the operator before each cluster upgrade.
     if (isK8s) {
@@ -168,32 +183,17 @@ function renderProcessSummary(selections, upgradePaths, osUpgradeRequired, isDir
       steps.push(`Upgrade OS to <strong>${escapeHtml(targetOsLabel)}</strong>`);
     }
 
-    // Database upgrade — only at hops where the current DB family is no longer
-    // bundled by the target cluster. Optional/recommended upgrades surface as a
-    // single trailing note after the loop instead of per-hop. Modules are
-    // bundled into this same line because the DB upgrade is what actually
-    // switches the active module version (cluster upgrade only installs the
-    // module package on the nodes).
-    const dbReq = getDatabaseUpgradeRequirement(runningDbFamily, stepTarget);
-    if (dbReq.status === 'required') {
-      const recommendedLabel = escapeHtml(getDatabaseVersionFamilyLabel(dbReq.recommended));
-      const moduleSuffix = formatModuleSuffix(dbReq.recommended, moduleNames, hasModules);
-      steps.push(`Database upgrade required (to <strong>${recommendedLabel}</strong>)${moduleSuffix}`);
-      runningDbFamily = dbReq.recommended;
-      dbEverRequired = true;
-    } else if (dbReq.status === 'recommended') {
-      dbEverRecommended = true;
+    // Post-cluster DB recommendation: recompute against the current running
+    // family. If a required pre-cluster step bumped the family to (say) 7.2
+    // but the target cluster bundles 8.2, this surfaces the optional follow-up
+    // upgrade the user can do once the cluster reaches the target.
+    const postDbReq = getDatabaseUpgradeRequirement(runningDbFamily, stepTarget);
+    if (postDbReq.status === 'recommended') {
+      const recommendedLabel = escapeHtml(getDatabaseVersionFamilyLabel(postDbReq.recommended));
+      const moduleSuffix = formatModuleSuffix(postDbReq.recommended, moduleNames, hasModules);
+      steps.push(`Database upgrade recommended (to <strong>${recommendedLabel}</strong>)${moduleSuffix}`);
+      // runningDbFamily intentionally NOT bumped — the user may defer.
     }
-    lastRecommendedDb = dbReq.recommended;
-  }
-
-  // Trailing recommended-DB note: shown when no hop forced an upgrade but the
-  // final target bundles a newer family than what the user is on today. Phrased
-  // as an active recommendation (post-cluster step) rather than an aside.
-  if (!dbEverRequired && dbEverRecommended && lastRecommendedDb && lastRecommendedDb !== runningDbFamily) {
-    const recommendedLabel = escapeHtml(getDatabaseVersionFamilyLabel(lastRecommendedDb));
-    const moduleSuffix = formatModuleSuffix(lastRecommendedDb, moduleNames, hasModules);
-    steps.push(`Database upgrade recommended &rarr; <strong>${recommendedLabel}</strong>${moduleSuffix}`);
   }
 
   // Active-Active deployments need a final synchronization check.

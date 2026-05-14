@@ -550,6 +550,28 @@ export function getRecommendedTargetDatabaseFamily(clusterVersion) {
   return supported[supported.length - 1] ?? '';
 }
 
+// Used for the pre-cluster-upgrade DB upgrade in Case-A-style hops: when the
+// current DB family isn't supported by the target cluster, the user has to
+// upgrade the DB while still on the source cluster — so the new DB family must
+// be supported by BOTH source and target. Returns the highest family that
+// satisfies all three constraints (in source's bundles, in target's bundles,
+// not below the current family). Empty string if none — e.g., when there's no
+// safe step and a different cluster path is required.
+const DATABASE_FAMILY_ORDER = ['6.0', '6.2', '7.2', '7.4', '8.0', '8.2', '8.4'];
+
+export function getPreClusterUpgradeDatabaseFamily(sourceClusterVersion, targetClusterVersion, currentDatabaseFamily) {
+  const sourceFamily = getClusterVersionFamily(sourceClusterVersion);
+  const targetFamily = getClusterVersionFamily(targetClusterVersion);
+  const sourceSupported = DATABASE_COMPATIBILITY_BY_CLUSTER_VERSION[sourceFamily] ?? [];
+  const targetSupported = new Set(DATABASE_COMPATIBILITY_BY_CLUSTER_VERSION[targetFamily] ?? []);
+  const currentIdx = DATABASE_FAMILY_ORDER.indexOf(currentDatabaseFamily);
+
+  const candidates = sourceSupported.filter((family) =>
+    targetSupported.has(family) && DATABASE_FAMILY_ORDER.indexOf(family) >= currentIdx,
+  );
+  return candidates[candidates.length - 1] ?? '';
+}
+
 // Classify what action the user needs to take on the database for a given hop.
 // `required`:    the current DB family is no longer bundled, so the upgrade is mandatory.
 // `recommended`: the current DB family is still bundled but a newer family is available,
