@@ -17,6 +17,7 @@ import {
   getModuleLabel,
   getModuleSelectionSummary,
   getPlatformSupport,
+  getPreClusterUpgradeDatabaseFamily,
   getRecommendedTargetDatabaseFamily,
   getSupportedOperatingSystemOptions,
   isK8sPlatform,
@@ -315,7 +316,7 @@ function buildClusterUpgradeStep(selections) {
       <p class="status-copy">
         <strong>Note on modules:</strong> the cluster upgrade installs new module packages on
         every node so they become available cluster-wide. The active module version inside each
-        database doesn't change until the database is upgraded (next step).
+        database doesn't change until you run the database upgrade for this hop.
       </p>
 
       <h4>Option 1: In-place upgrade</h4>
@@ -575,8 +576,9 @@ function buildOsUpgradeStep(selections) {
   };
 }
 
-function buildDatabaseUpgradeStep(selections) {
+function buildDatabaseUpgradeStep(selections, dbContext = {}) {
   const targetLabel = getClusterVersionLabel(selections.targetVersion);
+  const sourceLabel = getClusterVersionLabel(selections.sourceVersion);
   const moduleNames = getSelectedModuleNames(selections);
   const hasModules = moduleNames.length > 0;
   const moduleVersionListHtml = hasModules
@@ -587,11 +589,19 @@ function buildDatabaseUpgradeStep(selections) {
   // routed to buildK8sDatabaseUpgradeStep by buildWizardSteps, so a K8s branch
   // here would be unreachable.
 
-  const currentDbFamily = getDatabaseVersionFamily(selections.databaseVersion);
+  // dbContext is supplied by buildWizardSteps so the step reflects the running
+  // DB family at this hop (not the original selection) and uses the
+  // intersection-derived target for pre-cluster required upgrades. Falls back
+  // to the original selection for safety when called without context.
+  const currentDbFamily = dbContext.currentDbFamily
+    ?? getDatabaseVersionFamily(selections.databaseVersion);
   const currentDbLabel = getDatabaseVersionFamilyLabel(currentDbFamily);
   const dbReq = getDatabaseUpgradeRequirement(currentDbFamily, selections.targetVersion);
-  const recommendedDbLabel = dbReq.recommended
-    ? getDatabaseVersionFamilyLabel(dbReq.recommended)
+  const status = dbContext.status ?? dbReq.status;
+  const isPreCluster = dbContext.isPreCluster ?? false;
+  const targetDbFamily = dbContext.targetDbFamily || dbReq.recommended;
+  const recommendedDbLabel = targetDbFamily
+    ? getDatabaseVersionFamilyLabel(targetDbFamily)
     : '';
   // 7.8.2+: rladmin upgrade db upgrades the active module versions inside the DB
   // implicitly. On older targets, the user needs `latest_with_modules` (or a separate
@@ -701,24 +711,42 @@ function buildDatabaseUpgradeStep(selections) {
     };
   }
 
-  const dbIntroHtml = dbReq.status === 'required'
+  // Intro wording depends on where this step sits in the hop sequence:
+  // - isPreCluster=true means the hop's target cluster does not bundle the
+  //   current DB family, so the DB has to be upgraded on the SOURCE cluster
+  //   first, to the highest family bundled by both source and target.
+  // - isPreCluster=false (post-cluster) is the optional follow-up where the
+  //   cluster is already on the target and a newer DB family is available.
+  const dbIntroHtml = isPreCluster && status === 'required'
     ? `<p class="status-copy">Your current database family
         <strong>${escapeHtml(currentDbLabel)}</strong> is not bundled with
-        <strong>${escapeHtml(targetLabel)}</strong>. A database upgrade is
-        <strong>required</strong> as part of this step. The latest bundled family is
-        <strong>${escapeHtml(recommendedDbLabel)}</strong>.</p>`
-    : dbReq.status === 'recommended'
-      ? `<p class="status-copy"><strong>Recommended:</strong> upgrade the database to family
-          <strong>${escapeHtml(recommendedDbLabel)}</strong> once the cluster upgrade to
-          <strong>${escapeHtml(targetLabel)}</strong> is complete and healthy. Your existing
-          family <strong>${escapeHtml(currentDbLabel)}</strong> will keep running on the new
-          cluster, but Redis recommends moving to the latest bundled family for new features,
-          performance improvements, and updated module versions.</p>`
-      : `<p class="status-copy">Your current database family
-          <strong>${escapeHtml(currentDbLabel)}</strong> already matches the latest bundled family
-          for <strong>${escapeHtml(targetLabel)}</strong>. No database version change is required.</p>`;
+        <strong>${escapeHtml(targetLabel)}</strong>, so a database upgrade is
+        <strong>required before</strong> the cluster upgrade for this hop. Run this
+        upgrade while the cluster is still on <strong>${escapeHtml(sourceLabel)}</strong>
+        and target family <strong>${escapeHtml(recommendedDbLabel)}</strong> — the highest
+        family bundled with both <strong>${escapeHtml(sourceLabel)}</strong> and
+        <strong>${escapeHtml(targetLabel)}</strong>. Once the cluster reaches
+        <strong>${escapeHtml(targetLabel)}</strong>, you can optionally move to a newer
+        family in the follow-up step.</p>`
+    : status === 'recommended'
+      ? `<p class="status-copy"><strong>Recommended:</strong> now that the cluster is
+          running <strong>${escapeHtml(targetLabel)}</strong>, move the database to family
+          <strong>${escapeHtml(recommendedDbLabel)}</strong>. Your existing family
+          <strong>${escapeHtml(currentDbLabel)}</strong> will keep running, but Redis
+          recommends moving to the latest bundled family for new features, performance
+          improvements, and updated module versions.</p>`
+      : status === 'required'
+        ? `<p class="status-copy">Your current database family
+            <strong>${escapeHtml(currentDbLabel)}</strong> is not bundled with
+            <strong>${escapeHtml(targetLabel)}</strong>. A database upgrade to family
+            <strong>${escapeHtml(recommendedDbLabel)}</strong> is
+            <strong>required</strong>.</p>`
+        : `<p class="status-copy">Your current database family
+            <strong>${escapeHtml(currentDbLabel)}</strong> already matches the latest bundled
+            family for <strong>${escapeHtml(targetLabel)}</strong>. No database version change
+            is required.</p>`;
 
-  const rladminRedisVersion = dbReq.recommended || '&lt;version&gt;';
+  const rladminRedisVersion = targetDbFamily || '&lt;version&gt;';
 
   return {
     title: 'Upgrade the database',
@@ -765,9 +793,9 @@ function buildDatabaseUpgradeStep(selections) {
           </ul>
         </li>
         <li>
-          <strong>Verify the cluster is fully upgraded and operational</strong> — Confirm that all
-          cluster nodes have been upgraded to <strong>${escapeHtml(targetLabel)}</strong> and that
-          the cluster is healthy before proceeding with database upgrades.
+          <strong>Verify the cluster is healthy</strong> — Confirm that all nodes are running
+          <strong>${escapeHtml(isPreCluster ? sourceLabel : targetLabel)}</strong> and that the
+          cluster is healthy before proceeding with database upgrades.
         </li>
         <li>
           <strong>Check client compatibility with the database version</strong> — If you run Redis
@@ -1147,18 +1175,24 @@ function buildK8sClusterUpgradeStep(selections) {
   };
 }
 
-function buildK8sDatabaseUpgradeStep(selections) {
+function buildK8sDatabaseUpgradeStep(selections, dbContext = {}) {
   const targetLabel = getClusterVersionLabel(selections.targetVersion);
+  const sourceLabel = getClusterVersionLabel(selections.sourceVersion);
   const moduleNames = getSelectedModuleNames(selections);
   const hasModules = moduleNames.length > 0;
   const moduleVersionListHtml = hasModules
     ? buildModuleVersionListHtml(selections.targetVersion, moduleNames)
     : '';
 
-  const currentDbFamily = getDatabaseVersionFamily(selections.databaseVersion);
+  // See buildDatabaseUpgradeStep for the dbContext contract.
+  const currentDbFamily = dbContext.currentDbFamily
+    ?? getDatabaseVersionFamily(selections.databaseVersion);
   const currentDbLabel = getDatabaseVersionFamilyLabel(currentDbFamily);
   const dbReq = getDatabaseUpgradeRequirement(currentDbFamily, selections.targetVersion);
-  const recommendedDbFamily = dbReq.recommended || getRecommendedTargetDatabaseFamily(selections.targetVersion);
+  const status = dbContext.status ?? dbReq.status;
+  const isPreCluster = dbContext.isPreCluster ?? false;
+  const recommendedDbFamily =
+    dbContext.targetDbFamily || dbReq.recommended || getRecommendedTargetDatabaseFamily(selections.targetVersion);
   const recommendedDbLabel = recommendedDbFamily
     ? getDatabaseVersionFamilyLabel(recommendedDbFamily)
     : '';
@@ -1166,22 +1200,34 @@ function buildK8sDatabaseUpgradeStep(selections) {
   // recommendation is available rather than emitting an empty string.
   const redisVersionLiteral = recommendedDbFamily || '&lt;target-redis-version&gt;';
 
-  const dbStatusIntroHtml = dbReq.status === 'required'
+  const dbStatusIntroHtml = isPreCluster && status === 'required'
     ? `<p class="status-copy">Current database family
         <strong>${escapeHtml(currentDbLabel)}</strong> is not bundled with
-        <strong>${escapeHtml(targetLabel)}</strong>. Upgrade is <strong>required</strong>;
-        the recommended target family is
-        <strong>${escapeHtml(recommendedDbLabel)}</strong>.</p>`
-    : dbReq.status === 'recommended'
-      ? `<p class="status-copy"><strong>Recommended:</strong> after the REC reaches
+        <strong>${escapeHtml(targetLabel)}</strong>, so an upgrade is
+        <strong>required before</strong> the cluster upgrade for this hop. While the REC is
+        still on <strong>${escapeHtml(sourceLabel)}</strong>, update each REDB's
+        <code>spec.redisVersion</code> to family
+        <strong>${escapeHtml(recommendedDbLabel)}</strong> — the highest family bundled with
+        both <strong>${escapeHtml(sourceLabel)}</strong> and
+        <strong>${escapeHtml(targetLabel)}</strong>. Once the REC reaches
+        <strong>${escapeHtml(targetLabel)}</strong>, you can optionally move to a newer family
+        in the follow-up step.</p>`
+    : status === 'recommended'
+      ? `<p class="status-copy"><strong>Recommended:</strong> now that the REC is running
           <strong>${escapeHtml(targetLabel)}</strong> and shows <code>Running</code>, update each
           REDB's <code>spec.redisVersion</code> to family
           <strong>${escapeHtml(recommendedDbLabel)}</strong>. The existing family
           <strong>${escapeHtml(currentDbLabel)}</strong> keeps working, but Redis recommends
           moving to the latest bundled family for new features and updated module versions.</p>`
-      : `<p class="status-copy">Current database family
-          <strong>${escapeHtml(currentDbLabel)}</strong> already matches the latest bundled family for
-          <strong>${escapeHtml(targetLabel)}</strong>. No <code>redisVersion</code> change is required.</p>`;
+      : status === 'required'
+        ? `<p class="status-copy">Current database family
+            <strong>${escapeHtml(currentDbLabel)}</strong> is not bundled with
+            <strong>${escapeHtml(targetLabel)}</strong>. Upgrade to family
+            <strong>${escapeHtml(recommendedDbLabel)}</strong> is <strong>required</strong>.</p>`
+        : `<p class="status-copy">Current database family
+            <strong>${escapeHtml(currentDbLabel)}</strong> already matches the latest bundled family
+            for <strong>${escapeHtml(targetLabel)}</strong>. No <code>redisVersion</code> change is
+            required.</p>`;
 
   if (selections.activeActive) {
     return {
@@ -1241,13 +1287,20 @@ function buildK8sDatabaseUpgradeStep(selections) {
     };
   }
 
+  const k8sDbHopIntroHtml = isPreCluster
+    ? `<p class="status-copy">While the REC is still on
+        <strong>${escapeHtml(sourceLabel)}</strong>, upgrade each database by updating its
+        <code>RedisEnterpriseDatabase</code> (REDB) custom resource. Run this before the
+        operator/REC upgrade for this hop.</p>`
+    : `<p class="status-copy">After the Redis Enterprise cluster is running
+        <strong>${escapeHtml(targetLabel)}</strong>, upgrade each database by updating its
+        <code>RedisEnterpriseDatabase</code> (REDB) custom resource.</p>`;
+
   return {
     title: 'Upgrade the database',
     html: `
       ${dbStatusIntroHtml}
-      <p class="status-copy">After the Redis Enterprise cluster is running
-        <strong>${escapeHtml(targetLabel)}</strong>, upgrade each database by updating its
-        <code>RedisEnterpriseDatabase</code> (REDB) custom resource.</p>
+      ${k8sDbHopIntroHtml}
       <ol class="wizard-step-list">
         <li>
           <strong>Check current database versions</strong> — List all REDB resources and their current
@@ -1359,6 +1412,13 @@ function buildWizardSteps(selections, selectedPath) {
     });
   }
 
+  // Running DB family threaded across hops, so each hop's DB step reflects the
+  // family the user actually has at that point — not the original selection.
+  // Active-Active upgrades use a self-contained procedure (its own intro,
+  // own ordering) and are not modelled by the pre/post split.
+  let runningDbFamily = getDatabaseVersionFamily(selections.databaseVersion);
+  const useDbHopContext = !selections.activeActive;
+
   const finalStopIdx = versionStops.length - 1;
   for (let i = 0; i < versionStops.length - 1; i++) {
     const stepSource = versionStops[i];
@@ -1368,6 +1428,35 @@ function buildWizardSteps(selections, selectedPath) {
     const stepLabel = isMultiStep
       ? ` (${isBridgeHop ? 'Bridge version: ' : ''}${escapeHtml(getClusterVersionLabel(stepSource))} → ${escapeHtml(getClusterVersionLabel(stepTarget))})`
       : '';
+
+    // Pre-cluster DB upgrade: the target cluster doesn't bundle the running DB
+    // family, so the user has to upgrade the DB on the SOURCE cluster first.
+    // Mirrors the summary's "Database upgrade required (to X)" line in results.js.
+    if (useDbHopContext) {
+      const preDbReq = getDatabaseUpgradeRequirement(runningDbFamily, stepTarget);
+      if (preDbReq.status === 'required') {
+        const preClusterFamily =
+          getPreClusterUpgradeDatabaseFamily(stepSource, stepTarget, runningDbFamily) || preDbReq.recommended;
+        const preDbStep = isK8s
+          ? buildK8sDatabaseUpgradeStep(stepSelections, {
+              currentDbFamily: runningDbFamily,
+              targetDbFamily: preClusterFamily,
+              status: 'required',
+              isPreCluster: true,
+            })
+          : buildDatabaseUpgradeStep(stepSelections, {
+              currentDbFamily: runningDbFamily,
+              targetDbFamily: preClusterFamily,
+              status: 'required',
+              isPreCluster: true,
+            });
+        preDbStep.title = isMultiStep
+          ? `Upgrade the database — required before cluster upgrade${stepLabel}`
+          : 'Upgrade the database — required before cluster upgrade';
+        steps.push(preDbStep);
+        runningDbFamily = preClusterFamily;
+      }
+    }
 
     // Use K8s-specific steps when platform is Kubernetes
     const clusterStep = isK8s
@@ -1394,13 +1483,43 @@ function buildWizardSteps(selections, selectedPath) {
       }
     }
 
-    const dbStep = isK8s
-      ? buildK8sDatabaseUpgradeStep(stepSelections)
-      : buildDatabaseUpgradeStep(stepSelections);
-    if (isMultiStep) {
-      dbStep.title = `${dbStep.title}${stepLabel}`;
+    // Post-cluster DB step:
+    // - Active-Active: always emit (its own self-contained flow).
+    // - Otherwise: emit only when a newer bundled family is available for the
+    //   target cluster (status === 'recommended'). The pre-cluster step above
+    //   already covers the required case; status === 'none' means nothing to do.
+    if (useDbHopContext) {
+      const postDbReq = getDatabaseUpgradeRequirement(runningDbFamily, stepTarget);
+      if (postDbReq.status === 'recommended') {
+        const postDbStep = isK8s
+          ? buildK8sDatabaseUpgradeStep(stepSelections, {
+              currentDbFamily: runningDbFamily,
+              targetDbFamily: postDbReq.recommended,
+              status: 'recommended',
+              isPreCluster: false,
+            })
+          : buildDatabaseUpgradeStep(stepSelections, {
+              currentDbFamily: runningDbFamily,
+              targetDbFamily: postDbReq.recommended,
+              status: 'recommended',
+              isPreCluster: false,
+            });
+        postDbStep.title = isMultiStep
+          ? `Upgrade the database — recommended${stepLabel}`
+          : 'Upgrade the database — recommended';
+        steps.push(postDbStep);
+        // runningDbFamily intentionally NOT bumped — the user may defer.
+      }
+    } else {
+      // Active-Active: keep the original single-step behavior.
+      const dbStep = isK8s
+        ? buildK8sDatabaseUpgradeStep(stepSelections)
+        : buildDatabaseUpgradeStep(stepSelections);
+      if (isMultiStep) {
+        dbStep.title = `${dbStep.title}${stepLabel}`;
+      }
+      steps.push(dbStep);
     }
-    steps.push(dbStep);
   }
 
   return steps;
