@@ -3,7 +3,6 @@ import {
   escapeHtml,
   findUpgradePaths,
   getClusterVersionFamily,
-  getCompatibleModuleVersions,
   getDatabaseCompatibility,
   getDatabaseUpgradeRequirement,
   getDatabaseVersionFamily,
@@ -13,6 +12,7 @@ import {
   getModuleEntries,
   getModuleLabel,
   getModuleSelectionSummary,
+  getModulesForDatabaseFamily,
   getPlatformSupport,
   getSupportedOperatingSystemOptions,
   isK8sPlatform,
@@ -106,6 +106,16 @@ function renderResultsSummary(selections) {
   `;
 }
 
+function formatModuleSuffix(dbFamily, moduleNames, hasModules) {
+  if (!hasModules || !dbFamily) return '';
+  const modules = getModulesForDatabaseFamily(dbFamily, moduleNames);
+  if (!modules.length) return '';
+  const list = modules
+    .map((m) => `${escapeHtml(getModuleLabel(m))} <strong>${escapeHtml(m.version)}</strong>`)
+    .join(', ');
+  return ` (with modules: ${list})`;
+}
+
 function renderProcessSummary(selections, upgradePaths, osUpgradeRequired, isDirect) {
   if (!processSummary || !upgradePaths.length) return;
 
@@ -160,37 +170,21 @@ function renderProcessSummary(selections, upgradePaths, osUpgradeRequired, isDir
 
     // Database upgrade — only at hops where the current DB family is no longer
     // bundled by the target cluster. Optional/recommended upgrades surface as a
-    // single trailing note after the loop instead of per-hop.
+    // single trailing note after the loop instead of per-hop. Modules are
+    // bundled into this same line because the DB upgrade is what actually
+    // switches the active module version (cluster upgrade only installs the
+    // module package on the nodes).
     const dbReq = getDatabaseUpgradeRequirement(runningDbFamily, stepTarget);
     if (dbReq.status === 'required') {
       const recommendedLabel = escapeHtml(getDatabaseVersionFamilyLabel(dbReq.recommended));
-      steps.push(`Database upgrade required (to <strong>${recommendedLabel}</strong>)`);
+      const moduleSuffix = formatModuleSuffix(dbReq.recommended, moduleNames, hasModules);
+      steps.push(`Database upgrade required (to <strong>${recommendedLabel}</strong>)${moduleSuffix}`);
       runningDbFamily = dbReq.recommended;
       dbEverRequired = true;
     } else if (dbReq.status === 'recommended') {
       dbEverRecommended = true;
     }
     lastRecommendedDb = dbReq.recommended;
-
-    // Module upgrade — appears at any hop where the bundled module family changes
-    // between source and target cluster. On VMs this maps to a discrete
-    // `rladmin upgrade module` command; on Kubernetes it happens implicitly when
-    // the REDB's spec.redisVersion is bumped, but we still surface it so the
-    // preview shows the user which module versions to expect.
-    if (hasModules) {
-      const sourceModules = getCompatibleModuleVersions(stepSource, moduleNames);
-      const targetModules = getCompatibleModuleVersions(stepTarget, moduleNames);
-      const familyChanged = sourceModules.length !== targetModules.length
-        || sourceModules.some((m, idx) =>
-            m.feature_set !== targetModules[idx]?.feature_set
-            || m.version !== targetModules[idx]?.version);
-      if (familyChanged && targetModules.length) {
-        const moduleList = targetModules
-          .map((m) => `${escapeHtml(getModuleLabel(m))} <strong>${escapeHtml(m.version)}</strong>`)
-          .join(', ');
-        steps.push(`Upgrade modules: ${moduleList}`);
-      }
-    }
   }
 
   // Trailing recommended-DB note: shown when no hop forced an upgrade but the
@@ -198,7 +192,8 @@ function renderProcessSummary(selections, upgradePaths, osUpgradeRequired, isDir
   // as an active recommendation (post-cluster step) rather than an aside.
   if (!dbEverRequired && dbEverRecommended && lastRecommendedDb && lastRecommendedDb !== runningDbFamily) {
     const recommendedLabel = escapeHtml(getDatabaseVersionFamilyLabel(lastRecommendedDb));
-    steps.push(`Database upgrade recommended &rarr; <strong>${recommendedLabel}</strong>`);
+    const moduleSuffix = formatModuleSuffix(lastRecommendedDb, moduleNames, hasModules);
+    steps.push(`Database upgrade recommended &rarr; <strong>${recommendedLabel}</strong>${moduleSuffix}`);
   }
 
   // Active-Active deployments need a final synchronization check.

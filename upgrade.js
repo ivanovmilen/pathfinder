@@ -4,6 +4,7 @@ import {
   OS_UPGRADE_DOC_URL,
   OPERATOR_K8S_COMPATIBILITY,
   SUPPORTED_OPERATOR_VERSIONS,
+  clusterUpgradesModulesImplicitly,
   escapeHtml,
   getClusterVersionFamily,
   getOperatorVersionsForK8s,
@@ -311,6 +312,11 @@ function buildClusterUpgradeStep(selections) {
         <strong>${escapeHtml(targetLabel)}</strong>. Choose one of the two methods below.
         Complete all upgrade prerequisites before starting either method.
       </p>
+      <p class="status-copy">
+        <strong>Note on modules:</strong> the cluster upgrade installs new module packages on
+        every node so they become available cluster-wide. The active module version inside each
+        database doesn't change until the database is upgraded (next step).
+      </p>
 
       <h4>Option 1: In-place upgrade</h4>
       <p class="status-copy">
@@ -587,6 +593,10 @@ function buildDatabaseUpgradeStep(selections) {
   const recommendedDbLabel = dbReq.recommended
     ? getDatabaseVersionFamilyLabel(dbReq.recommended)
     : '';
+  // 7.8.2+: rladmin upgrade db upgrades the active module versions inside the DB
+  // implicitly. On older targets, the user needs `latest_with_modules` (or a separate
+  // `rladmin upgrade module`) to pull modules along.
+  const modulesUpgradeImplicitly = clusterUpgradesModulesImplicitly(selections.targetVersion);
 
   if (selections.activeActive) {
     return {
@@ -776,19 +786,37 @@ function buildDatabaseUpgradeStep(selections) {
           <strong>Upgrade the database</strong> — Use <code>rladmin</code> to upgrade the database.
           During the upgrade process, the database will restart without losing any data. Use the
           <code>preserve_roles</code> option to keep the database's current state, including primary
-          shard placement, and prevent the cluster from becoming unbalanced:
+          shard placement, and prevent the cluster from becoming unbalanced.
+          ${hasModules && !modulesUpgradeImplicitly ? `
+          On Redis Software 7.4 and earlier, add <code>latest_with_modules</code> so the DB upgrade
+          pulls module versions along with the Redis version:
+          <pre><code>rladmin upgrade db &lt;database name | database ID&gt; latest_with_modules preserve_roles</code></pre>
+          ` : `
           <pre><code>rladmin upgrade db &lt;database name | database ID&gt; preserve_roles</code></pre>
+          `}
           To upgrade the database to a version other than the default version, use the
           <code>redis_version</code> parameter (recommended target family
           <strong>${escapeHtml(recommendedDbLabel || 'latest bundled')}</strong>):
           <pre><code>rladmin upgrade db &lt;database name | database ID&gt; redis_version ${escapeHtml(rladminRedisVersion)} preserve_roles</code></pre>
         </li>
-        ${hasModules ? `
+        ${hasModules ? (modulesUpgradeImplicitly ? `
         <li>
-          <strong>Upgrade installed modules</strong> — After upgrading the database, verify that each
-          installed module is running a version compatible with
-          <strong>${escapeHtml(targetLabel)}</strong>. Use <code>rladmin status modules</code> to
-          check installed module versions. If a module needs to be updated, use:
+          <strong>Verify module versions</strong> — On Redis Software 7.8.2 and later,
+          <code>rladmin upgrade db</code> already upgraded the active module versions inside the
+          database. No separate <code>rladmin upgrade module</code> command is needed. Confirm with:
+          <pre><code>rladmin status modules</code></pre>
+          ${moduleVersionListHtml ? `
+          <p style="margin-top:0.5rem;"><strong>Compatible module versions for
+          ${escapeHtml(targetLabel)}:</strong></p>
+          ${moduleVersionListHtml}
+          ` : ''}
+        </li>
+        ` : `
+        <li>
+          <strong>Upgrade modules separately if needed</strong> — If you ran
+          <code>rladmin upgrade db</code> without <code>latest_with_modules</code>, run
+          <code>rladmin status modules</code> to see what's installed and upgrade any out-of-date
+          module on a per-database basis:
           <pre><code>rladmin upgrade module db_name &lt;database name&gt; module_name &lt;module&gt; version &lt;version&gt; module_args &lt;args&gt;</code></pre>
           ${moduleVersionListHtml ? `
           <p style="margin-top:0.5rem;"><strong>Compatible module versions for
@@ -796,7 +824,7 @@ function buildDatabaseUpgradeStep(selections) {
           ${moduleVersionListHtml}
           ` : ''}
         </li>
-        ` : ''}
+        `) : ''}
         <li>
           <strong>Verify the database upgrade</strong> — Check the Redis database compatibility
           version for the database to confirm the upgrade:
@@ -1033,6 +1061,11 @@ helm upgrade &lt;release-name&gt; redis/redis-enterprise-operator \\
       <p class="status-copy">Upgrade the Redis Enterprise cluster from
         <strong>${escapeHtml(sourceLabel)}</strong> to <strong>${escapeHtml(targetLabel)}</strong>
         using the <strong>${escapeHtml(methodLabel)}</strong> deployment method.</p>
+      <p class="status-copy">
+        <strong>Note on modules:</strong> the operator/REC upgrade installs new module packages on
+        the cluster. The active module version inside each <code>RedisEnterpriseDatabase</code>
+        only changes when you patch the REDB (next step).
+      </p>
       ${k8sUpgradeWarningHtml}
       ${operatorVersionRemarkHtml}
       <ol class="wizard-step-list">

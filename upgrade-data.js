@@ -20,8 +20,11 @@ const CLUSTER_VERSION_LABELS = {
   '7.4': '7.4.x',
   '7.8': '7.8.x',
   '7.22': '7.22.x',
-  '8.0.10': '8.0.2 – 8.0.10',
-  '8.0.16': '8.0.16 – 8.0.18',
+  '8.0.2': '8.0.2',
+  '8.0.6': '8.0.6',
+  '8.0.10': '8.0.10',
+  '8.0.16': '8.0.16',
+  '8.0.18': '8.0.18',
 };
 
 const DOCUMENTED_SOURCE_VERSIONS = [
@@ -38,7 +41,7 @@ const DOCUMENTED_SOURCE_VERSIONS = [
   '7.22',
 ];
 
-const DOCUMENTED_TARGET_VERSIONS = ['6.4', '7.2', '7.4', '7.8', '7.22', '8.0.10', '8.0.16'];
+const DOCUMENTED_TARGET_VERSIONS = ['6.4', '7.2', '7.4', '7.8', '7.22', '8.0.2', '8.0.6', '8.0.10', '8.0.16', '8.0.18'];
 
 // This selector uses the bundled Redis DB version families from the Redis docs'
 // "Default Redis database versions" table, not the separate default upgraded/new
@@ -257,13 +260,13 @@ const DIRECT_CLUSTER_UPGRADE_PATHS = {
   '6.2.10': ['6.4', '7.2', '7.4', '7.8'],
   '6.2.12': ['6.4', '7.2', '7.4', '7.8'],
   '6.2.18': ['6.4', '7.2', '7.4', '7.8'],
-  // 6.4 supports a direct upgrade to 8.0 only through 8.0.2–8.0.10. Reaching
-  // 8.0.16 – 8.0.18 requires an intermediate 7.x bridge version.
-  '6.4': ['6.4', '7.2', '7.4', '7.8', '7.22', '8.0.10'],
-  '7.2': ['7.2', '7.4', '7.8', '7.22', '8.0.10', '8.0.16'],
-  '7.4': ['7.4', '7.8', '7.22', '8.0.10', '8.0.16'],
-  '7.8': ['7.8', '7.22', '8.0.10', '8.0.16'],
-  '7.22': ['7.22', '8.0.10', '8.0.16'],
+  // 6.4 supports a direct upgrade to 8.0 only through 8.0.2/8.0.6/8.0.10. Reaching
+  // 8.0.16 or 8.0.18 requires an intermediate 7.x bridge version.
+  '6.4': ['6.4', '7.2', '7.4', '7.8', '7.22', '8.0.2', '8.0.6', '8.0.10'],
+  '7.2': ['7.2', '7.4', '7.8', '7.22', '8.0.2', '8.0.6', '8.0.10', '8.0.16', '8.0.18'],
+  '7.4': ['7.4', '7.8', '7.22', '8.0.2', '8.0.6', '8.0.10', '8.0.16', '8.0.18'],
+  '7.8': ['7.8', '7.22', '8.0.2', '8.0.6', '8.0.10', '8.0.16', '8.0.18'],
+  '7.22': ['7.22', '8.0.2', '8.0.6', '8.0.10', '8.0.16', '8.0.18'],
 };
 
 export const UPGRADE_PATH_DOC_URL =
@@ -417,6 +420,26 @@ export function getCompatibleModuleVersions(clusterVersion, moduleNames) {
 
 export function getModuleLabel(moduleObj) {
   return getModuleEntryLabel(moduleObj);
+}
+
+// Pick the module versions that match a specific database family. Unlike
+// getCompatibleModuleVersions (which picks based on a cluster version and falls
+// back to the highest compatible family), this returns the module bundled with
+// the exact DB family the user is upgrading to. Modules without an entry for
+// that family are dropped.
+export function getModulesForDatabaseFamily(databaseFamily, moduleNames) {
+  return moduleNames
+    .map((name) => (MODULES_BY_NAME[name] ?? []).find((module) => module.feature_set === databaseFamily))
+    .filter(Boolean);
+}
+
+// Redis Software 7.8.2 introduced implicit module upgrades inside `rladmin upgrade db`.
+// On older targets the user still needs to upgrade modules separately (or use the
+// `latest_with_modules` flag on the DB upgrade command).
+const IMPLICIT_MODULE_UPGRADE_FAMILIES = new Set(['7.8', '7.22', '8.0']);
+
+export function clusterUpgradesModulesImplicitly(clusterVersion) {
+  return IMPLICIT_MODULE_UPGRADE_FAMILIES.has(getClusterVersionFamily(clusterVersion));
 }
 
 export function getDirectUpgradeSupport(sourceVersion, targetVersion) {
