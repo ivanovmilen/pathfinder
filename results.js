@@ -117,52 +117,41 @@ function formatModuleSuffix(dbFamily, moduleNames, hasModules) {
   return ` (with modules: ${list})`;
 }
 
-function renderProcessSummary(selections, upgradePaths, osUpgradeRequired, isDirect) {
-  if (!processSummary || !upgradePaths.length) return;
-
-  // Pick the shortest path as the preview when multiple bridge routes exist.
-  const previewPath = upgradePaths.slice().sort((a, b) => a.length - b.length)[0];
-  const finalIdx = previewPath.length - 1;
-  const isMultiStep = previewPath.length > 2;
-  const isK8s = isK8sPlatform(selections.platform);
-
-  const selectedModules = Array.isArray(selections.modules) ? selections.modules : [];
-  const moduleNames = selectedModules.length
-    ? [...new Set(getModuleEntries(selectedModules).map((m) => m.name))]
-    : [];
-  const hasModules = moduleNames.length > 0;
-
+// Build the ordered list of summary steps for a single concrete upgrade path.
+// Returned as an array of HTML strings (one per <li>). The caller is
+// responsible for picking how to render multiple paths (one list vs. a labeled
+// option per path).
+function buildPathSummarySteps(selections, path, osUpgradeRequired, isK8s, moduleNames, hasModules) {
+  const finalIdx = path.length - 1;
+  const isMultiStep = path.length > 2;
   const steps = [];
 
-  // Track the DB family the user enters each hop with. Assume they defer DB
-  // upgrades until a hop's target cluster no longer bundles the current family,
-  // then jump to that hop's latest bundled family and ride it forward.
+  // DB family threaded across this path's hops.
   let runningDbFamily = getDatabaseVersionFamily(selections.databaseVersion);
 
-  // Pre-scan for OS upgrade placement: same logic as buildWizardSteps. Find the
-  // first hop whose target no longer supports the current OS — the OS upgrade
-  // must happen BEFORE that hop, on the previous version in the path.
+  // Per-path OS upgrade pre-scan: find the first hop whose target doesn't
+  // support the current OS. The OS upgrade has to happen BEFORE that hop, on
+  // the previous version in the path.
   let osUpgradeBeforeHopIdx = -1;
   let osUpgradeOnVersion = null;
   if (!isK8s && osUpgradeRequired && selections.operatingSystem) {
-    for (let j = 1; j < previewPath.length; j++) {
-      const candidateHopTarget = previewPath[j];
+    for (let j = 1; j < path.length; j++) {
       const supports = getPlatformSupport(
-        candidateHopTarget,
+        path[j],
         selections.platform,
         selections.operatingSystem,
       ).supported;
       if (!supports) {
         osUpgradeBeforeHopIdx = j;
-        osUpgradeOnVersion = previewPath[j - 1];
+        osUpgradeOnVersion = path[j - 1];
         break;
       }
     }
   }
 
-  for (let i = 1; i < previewPath.length; i++) {
-    const stepSource = previewPath[i - 1];
-    const stepTarget = previewPath[i];
+  for (let i = 1; i < path.length; i++) {
+    const stepSource = path[i - 1];
+    const stepTarget = path[i];
     const isBridgeHop = isMultiStep && i < finalIdx;
     const targetVersionLabel = escapeHtml(getClusterVersionLabel(stepTarget));
 
@@ -205,10 +194,6 @@ function renderProcessSummary(selections, upgradePaths, osUpgradeRequired, isDir
       steps.push(`Upgrade Cluster to <strong>${targetVersionLabel}</strong>`);
     }
 
-    // OS upgrade is emitted by the pre-hop block at the top of the loop body.
-    // No final-hop fallback is needed — the pre-scan above always picks the
-    // earliest hop where the OS becomes unsupported.
-
     // Post-cluster DB recommendation: recompute against the current running
     // family. If a required pre-cluster step bumped the family to (say) 7.2
     // but the target cluster bundles 8.2, this surfaces the optional follow-up
@@ -227,18 +212,66 @@ function renderProcessSummary(selections, upgradePaths, osUpgradeRequired, isDir
     steps.push('Verify CRDB Synchronization');
   }
 
+  return steps;
+}
+
+// Short, human-readable label for an upgrade path, used as the option header
+// when multiple bridge routes are available (e.g. "via 6.4.x" or "via 7.2.x → 7.22.x").
+function describePathOption(path) {
+  if (path.length <= 2) return 'direct';
+  const bridges = path.slice(1, -1).map((v) => getClusterVersionLabel(v));
+  return `via ${bridges.join(' → ')}`;
+}
+
+function renderProcessSummary(selections, upgradePaths, osUpgradeRequired, isDirect) {
+  if (!processSummary || !upgradePaths.length) return;
+
+  const isK8s = isK8sPlatform(selections.platform);
+  const selectedModules = Array.isArray(selections.modules) ? selections.modules : [];
+  const moduleNames = selectedModules.length
+    ? [...new Set(getModuleEntries(selectedModules).map((m) => m.name))]
+    : [];
+  const hasModules = moduleNames.length > 0;
+
+  const renderStepsList = (steps) =>
+    `<ol class="process-summary-steps">${steps.map((s) => `<li>${s}</li>`).join('')}</ol>`;
+
+  // Sort paths shortest first so the simplest option appears at the top.
+  const sortedPaths = upgradePaths.slice().sort((a, b) => a.length - b.length);
+  const hasMultiplePaths = sortedPaths.length > 1;
+  const shortestPath = sortedPaths[0];
+
+  let bodyHtml;
+  if (!hasMultiplePaths) {
+    const steps = buildPathSummarySteps(selections, shortestPath, osUpgradeRequired, isK8s, moduleNames, hasModules);
+    bodyHtml = renderStepsList(steps);
+  } else {
+    bodyHtml = sortedPaths
+      .map((path, idx) => {
+        const label = escapeHtml(describePathOption(path));
+        const steps = buildPathSummarySteps(selections, path, osUpgradeRequired, isK8s, moduleNames, hasModules);
+        return `
+          <section class="process-summary-option">
+            <h3 class="process-summary-option-title">Option ${idx + 1}: ${label}</h3>
+            ${renderStepsList(steps)}
+          </section>
+        `;
+      })
+      .join('');
+  }
+
   const intro = isDirect
     ? 'Your upgrade will proceed directly through these steps in the wizard:'
-    : `Your upgrade requires ${previewPath.length - 1} cluster upgrade steps via documented bridge versions:`;
+    : hasMultiplePaths
+      ? `Your upgrade can take any of ${sortedPaths.length} bridge paths. Each path is documented below; you'll pick one in the upgrade wizard.`
+      : `Your upgrade requires ${shortestPath.length - 1} cluster upgrade steps via documented bridge versions:`;
 
   processSummary.innerHTML = `
     <div class="guide-title-row">
       <h2 id="process-summary-title">Upgrade process summary</h2>
     </div>
     <p class="status-copy">${intro}</p>
-    <ol class="process-summary-steps">
-      ${steps.map((step) => `<li>${step}</li>`).join('')}
-    </ol>
+    ${bodyHtml}
   `;
   processSummary.hidden = false;
 }
@@ -359,6 +392,19 @@ function renderUpgradePathResult(selections) {
     osUpgradeNote.hidden = isK8sPlatform(selections.platform);
 
     if (hasIndirectPaths) {
+      // OS upgrade also has to be considered on the indirect path. The
+      // per-path summary builder figures out which hop the OS step belongs
+      // to; here we just decide whether one is needed at all by checking
+      // the final target version against the current OS.
+      const indirectFinalPlatformSupport = getPlatformSupport(
+        selections.targetVersion,
+        selections.platform,
+        selections.operatingSystem,
+      );
+      const indirectOsUpgradeRequired =
+        !indirectFinalPlatformSupport.supported
+        && indirectFinalPlatformSupport.reason === 'operating-system-not-supported';
+
       // Store the available indirect upgrade paths for the upgrade wizard.
       // Wrapped in its own try/catch so a storage failure (quota exceeded,
       // private-browsing restriction, etc.) cannot prevent the feasible result
@@ -373,8 +419,8 @@ function renderUpgradePathResult(selections) {
       } catch {
         // Storage failure is non-fatal; the wizard will rebuild paths on load.
       }
-      renderProcessSummary(selections, upgradePaths, false, false);
-      return { feasible: true, osUpgradeRequired: false, indirect: true };
+      renderProcessSummary(selections, upgradePaths, indirectOsUpgradeRequired, false);
+      return { feasible: true, osUpgradeRequired: indirectOsUpgradeRequired, indirect: true };
     }
 
     return { feasible: false };

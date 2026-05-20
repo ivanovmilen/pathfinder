@@ -588,6 +588,31 @@ code {
   font-weight: 600;
 }
 
+.process-summary-option {
+  margin-top: 1.25rem;
+  padding: 1rem 1.1rem;
+  background: var(--surface-alt);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.process-summary-option:first-of-type {
+  margin-top: 1rem;
+}
+
+.process-summary-option .process-summary-steps {
+  margin-top: 0.5rem;
+}
+
+.process-summary-option-title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--accent-strong);
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
 .guide-section {
   padding: 1.1rem 1rem;
 }
