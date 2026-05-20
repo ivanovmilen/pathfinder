@@ -307,6 +307,15 @@ export function getClusterVersionFamily(version) {
   return version;
 }
 
+// Cluster version families currently served from the Redis Download Center
+// (cloud.redis.io). Older families are only available via the redis.io
+// downloads archive or by request through Redis Support / your TAM.
+const DOWNLOAD_CENTER_FAMILIES = new Set(['7.22', '8.0']);
+
+export function isInDownloadCenter(clusterVersion) {
+  return DOWNLOAD_CENTER_FAMILIES.has(getClusterVersionFamily(clusterVersion));
+}
+
 export function getDatabaseVersionFamily(version) {
   if (version.startsWith('8.4.')) {
     return '8.4';

@@ -20,6 +20,7 @@ import {
   getPreClusterUpgradeDatabaseFamily,
   getRecommendedTargetDatabaseFamily,
   getSupportedOperatingSystemOptions,
+  isInDownloadCenter,
   isK8sPlatform,
 } from './upgrade-data.js';
 
@@ -338,9 +339,16 @@ rladmin status extra all</code></pre>
         </li>
         <li>
           <strong>Download the Redis Software installation package</strong> for
-          <strong>${escapeHtml(targetLabel)}</strong> from the
-          <a href="https://cloud.redis.io" target="_blank" rel="noreferrer">Download Center</a>
-          to the machine running the node.
+          <strong>${escapeHtml(targetLabel)}</strong>:
+          ${isInDownloadCenter(selections.targetVersion)
+            ? `Get the package from the
+               <a href="https://cloud.redis.io" target="_blank" rel="noreferrer">Download Center</a>
+               and copy it to the machine running the node.`
+            : `This version is no longer served from the
+               <a href="https://cloud.redis.io" target="_blank" rel="noreferrer">Download Center</a>.
+               Check the <a href="https://redis.io/downloads/" target="_blank" rel="noreferrer">Redis downloads archive</a>,
+               or contact <strong>Redis Support / your TAM</strong> to obtain the installation
+               package for this version.`}
         </li>
         <li>
           <strong>Extract the installation package:</strong>
@@ -461,18 +469,57 @@ rladmin status extra all</code></pre>
   };
 }
 
-function buildOsUpgradeStep(selections) {
+function buildOsUpgradeStep(selections, osContext = {}) {
+  const onClusterVersion = osContext.onClusterVersion ?? selections.sourceVersion;
+  const onClusterLabel = getClusterVersionLabel(onClusterVersion);
   const operatingSystemLabel = labelForOperatingSystem(selections.operatingSystem);
   const platformLabel = labelForPlatform(selections.platform);
-  const targetLabel = getClusterVersionLabel(selections.targetVersion);
+  const finalTargetLabel = getClusterVersionLabel(selections.targetVersion);
   const supportedTargetOsList = getSupportedOperatingSystemLabels(
     selections.targetVersion,
     selections.platform,
   );
+  const moduleNames = getSelectedModuleNames(selections);
+  const hasModules = moduleNames.length > 0;
   const targetOsCopy = supportedTargetOsList.length
-    ? `Documented supported operating systems for <strong>${escapeHtml(targetLabel)}</strong>
+    ? `Documented supported operating systems for <strong>${escapeHtml(finalTargetLabel)}</strong>
        on <strong>${escapeHtml(platformLabel)}</strong>: <strong>${escapeHtml(supportedTargetOsList.join(', '))}</strong>.`
     : `Review Redis's supported-platforms documentation for the target OS options.`;
+
+  // Module binaries are OS-specific. During the rolling OS upgrade the cluster
+  // temporarily contains nodes on both the old and new OS, so the cluster must
+  // hold module packages for BOTH OSes — otherwise shards using modules cannot
+  // be placed on the newly added new-OS nodes and the rolling replacement stalls.
+  const moduleBinaryNoteHtml = hasModules ? `
+      <section class="warning-panel" style="margin-bottom:1rem;">
+        <p class="status-copy">
+          <strong>Modules note:</strong> during this rolling OS upgrade the cluster will
+          temporarily contain nodes on both <strong>${escapeHtml(operatingSystemLabel)}</strong>
+          and the target OS. Redis module binaries are OS-specific, so the cluster must hold
+          module packages for <strong>both</strong> OS variants before any new-OS node joins.
+          Otherwise shards that use modules cannot be placed on the new node and the rolling
+          replacement will stall.
+        </p>
+        <p class="status-copy">
+          Upload the target-OS module packages to the cluster (while it is still running
+          <strong>${escapeHtml(operatingSystemLabel)}</strong>) before adding the first new-OS node:
+        </p>
+        <ul class="wizard-step-list">
+          <li>
+            <strong>Cluster Manager UI:</strong> Cluster &gt; Modules &gt; <em>Upload module</em>.
+            Upload the target-OS <code>.zip</code> bundle for each module already installed.
+          </li>
+          <li>
+            <strong>REST API:</strong>
+            <pre><code>curl -k -u &lt;user&gt;:&lt;password&gt; -F "module=@&lt;module-bundle-for-target-os&gt;.zip" https://&lt;cluster-host&gt;:9443/v2/modules</code></pre>
+          </li>
+        </ul>
+        <p class="status-copy">
+          After upload, run <code>rladmin status modules</code> and confirm both OS-specific
+          binaries appear for every module before adding a new-OS node to the cluster.
+        </p>
+      </section>
+  ` : '';
 
   return {
     title: 'Upgrade the operating system',
@@ -480,11 +527,20 @@ function buildOsUpgradeStep(selections) {
       <section class="warning-panel" style="margin-bottom:1rem;">
         <p class="status-copy">
           The current operating system <strong>${escapeHtml(operatingSystemLabel)}</strong>
-          is not listed as supported for <strong>${escapeHtml(targetLabel)}</strong>
-          on <strong>${escapeHtml(platformLabel)}</strong>. An OS upgrade is required.
+          is not listed as supported for <strong>${escapeHtml(finalTargetLabel)}</strong>
+          on <strong>${escapeHtml(platformLabel)}</strong>. An OS upgrade is required
+          <strong>before</strong> the cluster can be upgraded past
+          <strong>${escapeHtml(onClusterLabel)}</strong>.
         </p>
         <p class="status-copy">${targetOsCopy}</p>
+        <p class="status-copy">
+          Perform this rolling OS upgrade while the cluster is running
+          <strong>${escapeHtml(onClusterLabel)}</strong> — this version supports both
+          <strong>${escapeHtml(operatingSystemLabel)}</strong> and the target OS, so the cluster
+          stays available during the transition.
+        </p>
       </section>
+      ${moduleBinaryNoteHtml}
       <p class="status-copy">
         To upgrade the operating system on a Redis Software cluster to a later major version,
         perform a <strong>rolling upgrade</strong>. Because you upgrade one node at a time, you can
@@ -1419,6 +1475,30 @@ function buildWizardSteps(selections, selectedPath) {
   let runningDbFamily = getDatabaseVersionFamily(selections.databaseVersion);
   const useDbHopContext = !selections.activeActive;
 
+  // Pre-scan for OS upgrade placement: find the first hop whose target version
+  // no longer supports the current OS. The OS upgrade has to happen BEFORE
+  // that hop, while the cluster is still on a version that supports both the
+  // current and the target OS. The previous version in the path
+  // (versionStops[i]) is, by definition, the latest one in the path that
+  // still supports the current OS — so the OS upgrade is performed there.
+  let osUpgradeInsertBeforeHop = -1;
+  let osUpgradeOnClusterVersion = null;
+  if (!isK8s && selections.operatingSystem) {
+    for (let i = 0; i < versionStops.length - 1; i++) {
+      const hopTarget = versionStops[i + 1];
+      const supports = getPlatformSupport(
+        hopTarget,
+        selections.platform,
+        selections.operatingSystem,
+      ).supported;
+      if (!supports) {
+        osUpgradeInsertBeforeHop = i;
+        osUpgradeOnClusterVersion = versionStops[i];
+        break;
+      }
+    }
+  }
+
   const finalStopIdx = versionStops.length - 1;
   for (let i = 0; i < versionStops.length - 1; i++) {
     const stepSource = versionStops[i];
@@ -1428,6 +1508,20 @@ function buildWizardSteps(selections, selectedPath) {
     const stepLabel = isMultiStep
       ? ` (${isBridgeHop ? 'Bridge version: ' : ''}${escapeHtml(getClusterVersionLabel(stepSource))} → ${escapeHtml(getClusterVersionLabel(stepTarget))})`
       : '';
+
+    // OS upgrade: insert BEFORE this hop's cluster upgrade if this is the hop
+    // where the current OS would become unsupported. The OS upgrade is run on
+    // the previous cluster version (versionStops[i]), which still supports
+    // both the current and the target OS.
+    if (osUpgradeInsertBeforeHop === i) {
+      const osStep = buildOsUpgradeStep(selections, {
+        onClusterVersion: osUpgradeOnClusterVersion,
+      });
+      osStep.title = isMultiStep
+        ? `Upgrade the operating system (on ${getClusterVersionLabel(osUpgradeOnClusterVersion)})`
+        : 'Upgrade the operating system';
+      steps.push(osStep);
+    }
 
     // Pre-cluster DB upgrade: the target cluster doesn't bundle the running DB
     // family, so the user has to upgrade the DB on the SOURCE cluster first.
@@ -1467,21 +1561,10 @@ function buildWizardSteps(selections, selectedPath) {
     }
     steps.push(clusterStep);
 
-    // Check OS compatibility at each hop (skip for Kubernetes platforms)
-    if (!isK8s) {
-      const hopPlatformSupport = getPlatformSupport(
-        stepTarget,
-        selections.platform,
-        selections.operatingSystem,
-      );
-      if (!hopPlatformSupport.supported && hopPlatformSupport.reason === 'operating-system-not-supported') {
-        const osStep = buildOsUpgradeStep(stepSelections);
-        if (isMultiStep) {
-          osStep.title = `Upgrade the operating system${stepLabel}`;
-        }
-        steps.push(osStep);
-      }
-    }
+    // OS compatibility is handled by the pre-hop OS upgrade insertion above —
+    // we no longer emit a post-hop OS step. If the OS turns out to be
+    // unsupported by a later hop's target, the pre-scan would have caught it
+    // and placed a single OS upgrade earlier in the wizard.
 
     // Post-cluster DB step:
     // - Active-Active: always emit (its own self-contained flow).

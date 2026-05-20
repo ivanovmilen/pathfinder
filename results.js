@@ -139,11 +139,40 @@ function renderProcessSummary(selections, upgradePaths, osUpgradeRequired, isDir
   // then jump to that hop's latest bundled family and ride it forward.
   let runningDbFamily = getDatabaseVersionFamily(selections.databaseVersion);
 
+  // Pre-scan for OS upgrade placement: same logic as buildWizardSteps. Find the
+  // first hop whose target no longer supports the current OS — the OS upgrade
+  // must happen BEFORE that hop, on the previous version in the path.
+  let osUpgradeBeforeHopIdx = -1;
+  let osUpgradeOnVersion = null;
+  if (!isK8s && osUpgradeRequired && selections.operatingSystem) {
+    for (let j = 1; j < previewPath.length; j++) {
+      const candidateHopTarget = previewPath[j];
+      const supports = getPlatformSupport(
+        candidateHopTarget,
+        selections.platform,
+        selections.operatingSystem,
+      ).supported;
+      if (!supports) {
+        osUpgradeBeforeHopIdx = j;
+        osUpgradeOnVersion = previewPath[j - 1];
+        break;
+      }
+    }
+  }
+
   for (let i = 1; i < previewPath.length; i++) {
     const stepSource = previewPath[i - 1];
     const stepTarget = previewPath[i];
     const isBridgeHop = isMultiStep && i < finalIdx;
     const targetVersionLabel = escapeHtml(getClusterVersionLabel(stepTarget));
+
+    // OS upgrade — placed BEFORE the hop that loses support for the current OS.
+    if (osUpgradeBeforeHopIdx === i) {
+      const supportedTargetOs = getSupportedOperatingSystemOptions(selections.targetVersion, selections.platform);
+      const targetOsLabel = supportedTargetOs[0]?.label ?? 'a supported version';
+      const onVersionLabel = escapeHtml(getClusterVersionLabel(osUpgradeOnVersion));
+      steps.push(`Upgrade OS to <strong>${escapeHtml(targetOsLabel)}</strong> (on <strong>${onVersionLabel}</strong>)`);
+    }
 
     // Pre-cluster DB upgrade: when the current DB family isn't bundled with
     // the target cluster, the user MUST upgrade the DB before the cluster step.
@@ -176,12 +205,9 @@ function renderProcessSummary(selections, upgradePaths, osUpgradeRequired, isDir
       steps.push(`Upgrade Cluster to <strong>${targetVersionLabel}</strong>`);
     }
 
-    // OS upgrade — final hop only, non-K8s, when required. Specify the target OS.
-    if (!isK8s && osUpgradeRequired && i === finalIdx) {
-      const supportedTargetOs = getSupportedOperatingSystemOptions(stepTarget, selections.platform);
-      const targetOsLabel = supportedTargetOs[0]?.label ?? 'a supported version';
-      steps.push(`Upgrade OS to <strong>${escapeHtml(targetOsLabel)}</strong>`);
-    }
+    // OS upgrade is emitted by the pre-hop block at the top of the loop body.
+    // No final-hop fallback is needed — the pre-scan above always picks the
+    // earliest hop where the OS becomes unsupported.
 
     // Post-cluster DB recommendation: recompute against the current running
     // family. If a required pre-cluster step bumped the family to (say) 7.2
