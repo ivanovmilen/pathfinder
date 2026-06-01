@@ -16,6 +16,7 @@ import {
   getPlatformSupport,
   getPreClusterUpgradeDatabaseFamily,
   getSupportedOperatingSystemOptions,
+  isInDownloadCenter,
   isK8sPlatform,
 } from './upgrade-data.js';
 
@@ -223,6 +224,155 @@ function describePathOption(path) {
   return `via ${bridges.join(' → ')}`;
 }
 
+// Used to rank a path's bridge "freshness" relative to the other candidate
+// paths. Higher index = newer family. Versions outside the list rank at -1.
+const PATH_FAMILY_ORDER = ['6.0', '6.2', '6.4', '7.2', '7.4', '7.8', '7.22', '8.0'];
+
+// Extract decision-relevant facts about a single path. The numbers and flags
+// here are then compared across paths to produce comparative guidance — so each
+// fact should be something that can meaningfully differ between two candidate
+// paths to the same target.
+function buildPathFacts(selections, path, osUpgradeRequired, isK8s) {
+  const facts = {
+    bridges: path.slice(1, -1),
+    inTransitDbUpgrades: 0,        // required + recommended at non-final hops
+    preClusterRequiredDbUpgrades: 0, // mandatory DB upgrades before any cluster hop
+    osOnSourceCluster: false,       // OS upgrade must happen on the original cluster
+    osPlacedOnVersion: null,
+    anyBridgeNotInDownloadCenter: false,
+    bridgeRank: -1,                 // highest bridge family rank in PATH_FAMILY_ORDER
+  };
+
+  let runningDb = getDatabaseVersionFamily(selections.databaseVersion);
+  for (let i = 1; i < path.length; i++) {
+    const isFinalHop = i === path.length - 1;
+    const stepSource = path[i - 1];
+    const stepTarget = path[i];
+    const dbReq = getDatabaseUpgradeRequirement(runningDb, stepTarget);
+    if (dbReq.status === 'required') {
+      facts.preClusterRequiredDbUpgrades++;
+      if (!isFinalHop) facts.inTransitDbUpgrades++;
+      runningDb =
+        getPreClusterUpgradeDatabaseFamily(stepSource, stepTarget, runningDb) || dbReq.recommended;
+    }
+    const postDbReq = getDatabaseUpgradeRequirement(runningDb, stepTarget);
+    if (postDbReq.status === 'recommended' && !isFinalHop) {
+      facts.inTransitDbUpgrades++;
+    }
+  }
+
+  for (const b of facts.bridges) {
+    if (!isInDownloadCenter(b)) {
+      facts.anyBridgeNotInDownloadCenter = true;
+      break;
+    }
+  }
+
+  const bridgeRanks = facts.bridges
+    .map((b) => PATH_FAMILY_ORDER.indexOf(getClusterVersionFamily(b)))
+    .filter((r) => r >= 0);
+  facts.bridgeRank = bridgeRanks.length ? Math.max(...bridgeRanks) : -1;
+
+  if (osUpgradeRequired && !isK8s && selections.operatingSystem) {
+    for (let j = 1; j < path.length; j++) {
+      const supports = getPlatformSupport(
+        path[j],
+        selections.platform,
+        selections.operatingSystem,
+      ).supported;
+      if (!supports) {
+        facts.osPlacedOnVersion = path[j - 1];
+        facts.osOnSourceCluster = j === 1;
+        break;
+      }
+    }
+  }
+
+  return facts;
+}
+
+// Produce a {pros, cons} pair for a single path by comparing its facts to the
+// other candidate paths' facts. "Pros" are reasons to pick THIS path that the
+// others don't offer. "Cons" are absolute caveats — things the user has to
+// accept if they pick this path.
+function buildPathGuidance(facts, allFacts, pathIndex) {
+  const me = facts;
+  const others = allFacts.filter((_, i) => i !== pathIndex);
+  const pros = [];
+  const cons = [];
+
+  // Bridge characterization — relative position in the candidate set.
+  if (me.bridges.length === 1) {
+    const bridgeLabel = escapeHtml(getClusterVersionLabel(me.bridges[0]));
+    const ranks = allFacts.map((f) => f.bridgeRank);
+    const minRank = Math.min(...ranks);
+    const maxRank = Math.max(...ranks);
+    if (me.bridgeRank === minRank && minRank < maxRank) {
+      pros.push(`Bridge <strong>${bridgeLabel}</strong> is closest to your current version — smallest first hop, with minimal cross-major change up front.`);
+    } else if (me.bridgeRank === maxRank && maxRank > minRank) {
+      pros.push(`Bridge <strong>${bridgeLabel}</strong> is the most recent intermediate version — smallest final hop and the longest Redis support window at the bridge.`);
+    } else if (allFacts.length > 2) {
+      pros.push(`Bridge <strong>${bridgeLabel}</strong> is a balanced choice — moderate first and final hops.`);
+    }
+  }
+
+  // In-transit DB upgrades (between bridge hops).
+  const allInTransit = allFacts.map((f) => f.inTransitDbUpgrades);
+  const minInTransit = Math.min(...allInTransit);
+  const maxInTransit = Math.max(...allInTransit);
+  if (me.inTransitDbUpgrades === minInTransit && minInTransit < maxInTransit) {
+    pros.push(
+      minInTransit === 0
+        ? 'Database family stays unchanged through the bridge hop — no in-transit DB upgrade.'
+        : `Fewest in-transit database changes among the available paths (${minInTransit}).`,
+    );
+  }
+
+  // OS timing — only flagged when this path lets the user defer OS work that
+  // another path can't.
+  if (me.osPlacedOnVersion && !me.osOnSourceCluster && others.some((o) => o.osOnSourceCluster)) {
+    const onLabel = escapeHtml(getClusterVersionLabel(me.osPlacedOnVersion));
+    pros.push(`OS upgrade can be deferred to the <strong>${onLabel}</strong> bridge cluster — no OS work on the original cluster.`);
+  }
+
+  // Download Center coverage — meaningful only when others lack it.
+  if (!me.anyBridgeNotInDownloadCenter && others.some((o) => o.anyBridgeNotInDownloadCenter)) {
+    pros.push('All bridge versions on this path are currently in the Download Center — no installer request needed.');
+  }
+
+  // Caveats — emitted unconditionally when true, even if every path shares them
+  // (it's useful for the user to know the limitation applies across the board).
+  if (me.osOnSourceCluster) {
+    cons.push(`Bridge no longer supports your current OS — an OS upgrade must be performed on the original cluster <strong>before</strong> any Redis Software upgrade can begin.`);
+  }
+  if (me.preClusterRequiredDbUpgrades > 0) {
+    const n = me.preClusterRequiredDbUpgrades;
+    cons.push(`Includes ${n} mandatory database family upgrade${n > 1 ? 's' : ''} before the corresponding cluster hop.`);
+  }
+  if (me.anyBridgeNotInDownloadCenter) {
+    cons.push('Bridge version is no longer served from the Download Center — the installer may need to be requested via the Redis downloads archive or from Redis Support.');
+  }
+
+  return { pros, cons };
+}
+
+function renderPathGuidanceHtml({ pros, cons }) {
+  if (!pros.length && !cons.length) return '';
+  const prosHtml = pros.length
+    ? `<div class="process-summary-pros">
+         <span class="process-summary-guidance-label">Pick this if:</span>
+         <ul>${pros.map((p) => `<li>${p}</li>`).join('')}</ul>
+       </div>`
+    : '';
+  const consHtml = cons.length
+    ? `<div class="process-summary-cons">
+         <span class="process-summary-guidance-label">Caveats:</span>
+         <ul>${cons.map((c) => `<li>${c}</li>`).join('')}</ul>
+       </div>`
+    : '';
+  return `<div class="process-summary-guidance">${prosHtml}${consHtml}</div>`;
+}
+
 function renderProcessSummary(selections, upgradePaths, osUpgradeRequired, isDirect) {
   if (!processSummary || !upgradePaths.length) return;
 
@@ -246,14 +396,19 @@ function renderProcessSummary(selections, upgradePaths, osUpgradeRequired, isDir
     const steps = buildPathSummarySteps(selections, shortestPath, osUpgradeRequired, isK8s, moduleNames, hasModules);
     bodyHtml = renderStepsList(steps);
   } else {
+    // Pre-compute facts for every path so each option's guidance can position
+    // itself relative to the rest of the candidate set.
+    const allFacts = sortedPaths.map((path) => buildPathFacts(selections, path, osUpgradeRequired, isK8s));
     bodyHtml = sortedPaths
       .map((path, idx) => {
         const label = escapeHtml(describePathOption(path));
         const steps = buildPathSummarySteps(selections, path, osUpgradeRequired, isK8s, moduleNames, hasModules);
+        const guidanceHtml = renderPathGuidanceHtml(buildPathGuidance(allFacts[idx], allFacts, idx));
         return `
           <section class="process-summary-option">
             <h3 class="process-summary-option-title">Option ${idx + 1}: ${label}</h3>
             ${renderStepsList(steps)}
+            ${guidanceHtml}
           </section>
         `;
       })

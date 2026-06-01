@@ -613,6 +613,58 @@ code {
   text-transform: uppercase;
 }
 
+.process-summary-guidance {
+  margin-top: 0.85rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  font-size: 0.95rem;
+  line-height: 1.55;
+}
+
+.process-summary-pros,
+.process-summary-cons {
+  padding: 0.65rem 0.85rem;
+  border-radius: 8px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+
+.process-summary-pros {
+  border-left: 3px solid var(--success);
+}
+
+.process-summary-cons {
+  border-left: 3px solid var(--warning);
+  background: var(--warning-bg);
+}
+
+.process-summary-guidance-label {
+  display: block;
+  font-weight: 600;
+  margin-bottom: 0.3rem;
+  color: var(--text);
+}
+
+.process-summary-pros .process-summary-guidance-label {
+  color: var(--success);
+}
+
+.process-summary-cons .process-summary-guidance-label {
+  color: var(--warning);
+}
+
+.process-summary-pros ul,
+.process-summary-cons ul {
+  margin: 0;
+  padding-left: 1.15rem;
+}
+
+.process-summary-pros li,
+.process-summary-cons li {
+  margin: 0.15rem 0;
+}
+
 .guide-section {
   padding: 1.1rem 1rem;
 }
