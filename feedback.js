@@ -69,11 +69,12 @@ function buildWidget() {
   widget.setAttribute('aria-labelledby', 'feedback-title');
   widget.innerHTML = `
     <div class="feedback-header">
-      <h2 id="feedback-title">Share feedback</h2>
+      <h2 id="feedback-title">Tell us what's wrong or missing</h2>
       <p class="feedback-intro">
-        Helps us tune the recommendations. Opens a pre-filled GitHub issue in a
-        new tab — pick a type from the dropdown, write a sentence or two, edit
-        before submitting.
+        Worth reporting: a step in the wrong order, a missing prerequisite,
+        outdated guidance, a UI bug, or anything you'd handle differently in
+        your environment. Your current selections come along automatically so
+        we can reproduce what you saw.
       </p>
     </div>
     <a
@@ -84,7 +85,7 @@ function buildWidget() {
     >
       <span class="feedback-button-label">💬 Share feedback</span>
       <span class="feedback-button-desc">
-        Flow gotcha, correction, idea, or bug — pick the type after the click.
+        Flow gotcha, correction, idea, or bug — pick a type when the editor opens.
       </span>
     </a>
   `;
