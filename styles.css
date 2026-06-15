@@ -1006,3 +1006,65 @@ code {
   color: var(--muted);
   line-height: 1.4;
 }
+
+/* feedback-form-trial — remove this whole block to drop the feedback widget */
+.feedback-block {
+  margin: 2.5rem auto 0;
+  padding: 1.5rem 1.6rem;
+  max-width: 960px;
+  background: var(--surface-alt);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+}
+
+.feedback-header h2 {
+  margin: 0;
+  font-size: 1.15rem;
+  color: var(--text);
+}
+
+.feedback-intro {
+  margin: 0.4rem 0 0;
+  font-size: 0.95rem;
+  color: var(--muted);
+}
+
+.feedback-buttons {
+  margin-top: 1.1rem;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0.7rem;
+}
+
+.feedback-button {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.85rem 1rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  text-decoration: none;
+  color: var(--text);
+  transition: border-color 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.feedback-button:hover,
+.feedback-button:focus-visible {
+  border-color: var(--accent);
+  transform: translateY(-1px);
+  box-shadow: 0 6px 18px rgba(126, 35, 28, 0.08);
+  outline: none;
+}
+
+.feedback-button-label {
+  font-weight: 600;
+  font-size: 0.95rem;
+}
+
+.feedback-button-desc {
+  font-size: 0.82rem;
+  color: var(--muted);
+  line-height: 1.35;
+}
+/* /feedback-form-trial */
