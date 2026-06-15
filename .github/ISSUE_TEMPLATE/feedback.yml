@@ -1,0 +1,49 @@
+name: Pathfinder feedback
+description: Share an idea, a correction, or a bug from using the Redis Enterprise upgrade pathfinder.
+title: "[feedback] "
+labels:
+  - feedback
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for sharing! Pick the type below — we use it for triage.
+        If you started this from the app, your selections are already attached at the bottom.
+
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Type of feedback
+      options:
+        - 🧭 Upgrade flow / sequencing / gotcha
+        - ✏️ Correction — guidance is wrong, outdated, or incomplete
+        - 💡 Idea / enhancement / missing case
+        - 🐞 App bug — something in the UI is broken
+    validations:
+      required: true
+
+  - type: textarea
+    id: details
+    attributes:
+      label: Your feedback
+      description: |
+        Pick whichever applies — you don't have to fill in all of them.
+
+        - **Flow** — what's missing or wrong about the sequencing? Real-world experience welcome ("in our environment we always do X before Y because…").
+        - **Correction** — quote what the app says vs. what it should say. Link to Redis docs / KB article if you have one.
+        - **Idea** — what would you like to see, and why? What problem would it solve?
+        - **Bug** — steps to reproduce, plus expected vs. actual behavior.
+    validations:
+      required: true
+
+  - type: textarea
+    id: selections
+    attributes:
+      label: Selections (auto-attached by the app)
+      description: The values you had picked when you opened this. Paste back into the form to reproduce.
+      render: json
+
+  - type: input
+    id: page_url
+    attributes:
+      label: Page URL where this feedback was started

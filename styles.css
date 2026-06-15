@@ -1015,6 +1015,15 @@ code {
   background: var(--surface-alt);
   border: 1px solid var(--border);
   border-radius: 14px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1.25rem;
+}
+
+.feedback-header {
+  flex: 1 1 320px;
 }
 
 .feedback-header h2 {
@@ -1029,42 +1038,36 @@ code {
   color: var(--muted);
 }
 
-.feedback-buttons {
-  margin-top: 1.1rem;
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 0.7rem;
-}
-
 .feedback-button {
-  display: flex;
+  display: inline-flex;
   flex-direction: column;
-  gap: 0.25rem;
-  padding: 0.85rem 1rem;
-  background: var(--surface);
-  border: 1px solid var(--border);
+  align-items: flex-start;
+  gap: 0.2rem;
+  padding: 0.85rem 1.1rem;
+  background: var(--accent);
+  color: #ffffff;
+  border: 1px solid var(--accent-strong);
   border-radius: 10px;
   text-decoration: none;
-  color: var(--text);
-  transition: border-color 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
+  transition: background 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
 }
 
 .feedback-button:hover,
 .feedback-button:focus-visible {
-  border-color: var(--accent);
+  background: var(--accent-strong);
   transform: translateY(-1px);
-  box-shadow: 0 6px 18px rgba(126, 35, 28, 0.08);
+  box-shadow: 0 8px 20px rgba(126, 35, 28, 0.18);
   outline: none;
 }
 
 .feedback-button-label {
   font-weight: 600;
-  font-size: 0.95rem;
+  font-size: 0.98rem;
 }
 
 .feedback-button-desc {
-  font-size: 0.82rem;
-  color: var(--muted);
+  font-size: 0.8rem;
+  opacity: 0.85;
   line-height: 1.35;
 }
 /* /feedback-form-trial */
