@@ -106,6 +106,25 @@
             </aside>
           </div>
 
+          <div class="field field-with-help">
+            <div class="field-label-row">
+              <label for="target-database-version" class="field-label">Target database version</label>
+              <button
+                type="button"
+                class="field-help-toggle"
+                aria-label="How to choose the target database version"
+                aria-controls="target-database-version-help"
+                aria-expanded="false"
+              >
+                i
+              </button>
+            </div>
+            <select id="target-database-version"></select>
+            <aside id="target-database-version-help" class="field-help-panel field-help-panel-wide" hidden>
+              The database version you plan to run after the upgrade. Only versions bundled with your target Redis Enterprise version and newer than your current database are offered. Pathfinder reports the Redis Community Edition breaking changes introduced across this jump so you can review command and behavior changes before upgrading.
+            </aside>
+          </div>
+
           <div id="k8s-distribution-field" class="field">
             <label for="k8s-distribution" class="field-label">Deployment platform</label>
             <select id="k8s-distribution"></select>

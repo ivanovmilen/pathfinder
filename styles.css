@@ -721,6 +721,118 @@ code {
 }
 
 /* ---------------------------------------------------------------------------
+   Breaking changes (results summary card + wizard database step)
+   --------------------------------------------------------------------------- */
+
+.breaking-changes-area-list {
+  margin: 0.75rem 0 0;
+  padding-left: 1.1rem;
+  display: grid;
+  gap: 0.35rem;
+}
+
+.breaking-changes-area-list li {
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
+.breaking-changes-gap {
+  margin-top: 0.85rem;
+  padding: 0.75rem 0.9rem;
+  background: var(--warning-bg);
+  border: 1px solid #f1d48a;
+  border-radius: 12px;
+  font-size: 0.85rem;
+}
+
+.breaking-changes-gap a,
+.breaking-changes-summary a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.breaking-changes-gap a:hover,
+.breaking-changes-summary a:hover {
+  text-decoration: underline;
+}
+
+.breaking-changes-pointer {
+  margin-top: 0.85rem;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.wizard-step-breaking-changes {
+  margin-top: 1.25rem;
+  padding: 1rem 1.1rem;
+  background: var(--surface-alt);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+}
+
+.wizard-step-breaking-changes > h4 {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--accent-strong);
+  margin-bottom: 0.45rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.breaking-changes-entry {
+  margin-top: 0.9rem;
+  padding-top: 0.9rem;
+  border-top: 1px dashed var(--border);
+}
+
+.breaking-changes-entry:first-of-type {
+  border-top: none;
+  padding-top: 0;
+}
+
+.breaking-changes-entry h5 {
+  font-size: 0.95rem;
+  font-weight: 600;
+  margin-bottom: 0.4rem;
+}
+
+.breaking-changes-entry ul {
+  margin: 0.35rem 0 0;
+  padding-left: 1.1rem;
+  display: grid;
+  gap: 0.3rem;
+}
+
+.breaking-changes-entry li,
+.breaking-changes-entry p {
+  font-size: 0.88rem;
+  line-height: 1.5;
+}
+
+.breaking-changes-area {
+  margin-top: 0.6rem;
+}
+
+.breaking-changes-entry code {
+  background: var(--accent-soft);
+  padding: 0.05rem 0.3rem;
+  border-radius: 5px;
+  font-size: 0.82em;
+}
+
+.breaking-changes-source {
+  display: inline-block;
+  margin-top: 0.5rem;
+  color: var(--accent);
+  font-size: 0.82rem;
+  text-decoration: none;
+}
+
+.breaking-changes-source:hover {
+  text-decoration: underline;
+}
+
+/* ---------------------------------------------------------------------------
    Wizard
    --------------------------------------------------------------------------- */
 
@@ -1071,3 +1183,174 @@ code {
   line-height: 1.35;
 }
 /* /feedback-form-trial */
+
+/* ---------------------------------------------------------------------------
+   PDF export (Download PDF button + print-only document)
+   --------------------------------------------------------------------------- */
+
+.prepared-for-input {
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font-size: 0.85rem;
+  background: var(--surface);
+  color: var(--text);
+  min-width: 12rem;
+}
+
+.prepared-for-input::placeholder {
+  color: var(--muted);
+}
+
+/* The print document is built on demand and never shown on screen — only the
+   browser's print/PDF view reveals it (see @media print below). */
+#print-document {
+  display: none;
+}
+
+@media print {
+  /* Hide the interactive app, the feedback widget, and the decorative body
+     watermark; show only the document. */
+  .page-shell,
+  .feedback-block,
+  body::before {
+    display: none !important;
+  }
+
+  html,
+  body {
+    background: #ffffff !important;
+    color: #1a1a1a;
+    font-size: 11pt;
+  }
+
+  #print-document {
+    display: block;
+  }
+
+  @page {
+    size: A4;
+    margin: 16mm 14mm;
+  }
+
+  .print-cover {
+    border-bottom: 2px solid var(--accent);
+    padding-bottom: 12pt;
+    margin-bottom: 16pt;
+  }
+
+  .print-logo {
+    height: 26pt;
+    width: auto;
+  }
+
+  .print-title {
+    font-size: 20pt;
+    margin: 10pt 0 4pt;
+  }
+
+  .print-meta {
+    font-size: 10pt;
+    color: #555555;
+  }
+
+  .print-summary {
+    margin-bottom: 16pt;
+    break-inside: avoid;
+  }
+
+  .print-summary h2,
+  .print-step-title {
+    font-size: 13pt;
+  }
+
+  .print-summary .results-summary-list {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 3pt 24pt;
+    margin-top: 6pt;
+  }
+
+  .print-summary dt {
+    font-size: 9pt;
+    font-weight: 600;
+    color: #555555;
+  }
+
+  .print-summary dd {
+    margin: 0 0 4pt;
+    font-size: 10.5pt;
+  }
+
+  .print-path {
+    margin-top: 10pt;
+    font-size: 10.5pt;
+  }
+
+  .print-step {
+    margin-bottom: 14pt;
+  }
+
+  .print-step-title {
+    color: var(--accent-strong);
+    border-bottom: 1px solid #cccccc;
+    padding-bottom: 4pt;
+    margin-bottom: 8pt;
+    break-after: avoid;
+  }
+
+  /* Keep atomic units from splitting across pages. */
+  #print-document pre,
+  #print-document li,
+  #print-document .breaking-changes-entry,
+  #print-document .wizard-step-ref,
+  #print-document .wizard-step-breaking-changes {
+    break-inside: avoid;
+  }
+
+  #print-document pre {
+    white-space: pre-wrap;
+    word-break: break-word;
+    background: #f5f5f5;
+    border: 1px solid #dddddd;
+    border-radius: 6px;
+    padding: 6pt 8pt;
+    font-size: 9pt;
+  }
+
+  #print-document code {
+    background: #f0f0f0;
+    padding: 0.05rem 0.25rem;
+    border-radius: 4px;
+  }
+
+  /* Flatten the app's card/panel chrome so it prints as clean prose. */
+  #print-document .guide-panel,
+  #print-document .wizard-step-breaking-changes {
+    background: transparent;
+    border: none;
+    box-shadow: none;
+    padding: 0;
+  }
+
+  /* Make hyperlinks self-contained on paper: show the URL after the text. */
+  #print-document a[href^="http"]::after {
+    content: " (" attr(href) ")";
+    font-size: 0.8em;
+    color: #555555;
+    word-break: break-all;
+  }
+
+  #print-document a {
+    color: #1a1a1a;
+    text-decoration: underline;
+  }
+
+  .print-footer {
+    margin-top: 18pt;
+    padding-top: 8pt;
+    border-top: 1px solid #cccccc;
+    font-size: 8.5pt;
+    color: #666666;
+  }
+}

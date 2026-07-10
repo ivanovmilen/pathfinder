@@ -3,6 +3,7 @@ import {
   escapeHtml,
   findUpgradePaths,
   getClusterVersionFamily,
+  getDatabaseBreakingChanges,
   getDatabaseCompatibility,
   getDatabaseUpgradeRequirement,
   getDatabaseVersionFamily,
@@ -23,6 +24,7 @@ import {
 const guideOutput = document.querySelector('#guide-output');
 const resultsSummary = document.querySelector('#results-summary');
 const processSummary = document.querySelector('#process-summary');
+const breakingChangesSummary = document.querySelector('#breaking-changes-summary');
 const editSelectionsButton = document.querySelector('#edit-selections');
 const startUpgradeGuideWrapper = document.querySelector('#start-upgrade-guide-wrapper');
 const startUpgradeGuideButton = document.querySelector('#start-upgrade-guide');
@@ -80,6 +82,12 @@ function renderResultsSummary(selections) {
         <dt>Current database version</dt>
         <dd>${escapeHtml(getDatabaseVersionFamilyLabel(selections.databaseVersion))}</dd>
       </div>
+      ${selections.targetDatabaseVersion ? `
+      <div>
+        <dt>Target database version</dt>
+        <dd>${escapeHtml(getDatabaseVersionFamilyLabel(selections.targetDatabaseVersion))}</dd>
+      </div>
+      ` : ''}
       <div>
         <dt>Deployment platform</dt>
         <dd>${escapeHtml(labelForPlatform(selections.platform))}</dd>
@@ -701,6 +709,73 @@ function renderUpgradePathResult(selections) {
   return { feasible: true, osUpgradeRequired };
 }
 
+// Concise breaking-changes card: how many documented CE breaking-change areas
+// the DB jump crosses, which areas, and a pointer into the wizard's DB step for
+// the full text. Hidden entirely when there is no database upgrade.
+function renderBreakingChangesSummary(selections) {
+  if (!breakingChangesSummary) return;
+
+  const result = getDatabaseBreakingChanges(
+    selections.databaseVersion,
+    selections.targetDatabaseVersion,
+  );
+
+  // No target DB chosen, or target is the same/older family — nothing to report.
+  if (!selections.targetDatabaseVersion || result.entries.length === 0) {
+    breakingChangesSummary.hidden = true;
+    return;
+  }
+
+  const sourceLabel = getDatabaseVersionFamilyLabel(result.sourceFamily);
+  const targetLabel = getDatabaseVersionFamilyLabel(result.targetFamily);
+
+  // Group affected areas by the release that introduced them.
+  const byFamily = new Map();
+  result.affectedAreas.forEach(({ family, area }) => {
+    if (!byFamily.has(family)) byFamily.set(family, []);
+    byFamily.get(family).push(area);
+  });
+  const areasHtml = [...byFamily.entries()]
+    .map(([family, areas]) => {
+      // Prose-only releases (7.2, 7.4) have null areas — describe them generically
+      // instead of printing the family name twice.
+      const namedAreas = areas.filter(Boolean);
+      const areaText = namedAreas.length
+        ? namedAreas.map((area) => escapeHtml(area)).join(', ')
+        : 'command &amp; behavior changes';
+      return `
+        <li>
+          <strong>Redis ${escapeHtml(getDatabaseVersionFamilyLabel(family))}:</strong>
+          ${areaText}
+        </li>
+      `;
+    })
+    .join('');
+
+  const countLine = result.hasData
+    ? `<strong>${result.itemCount}</strong> documented breaking-change area${result.itemCount === 1 ? '' : 's'} to review when upgrading your database from Redis ${escapeHtml(sourceLabel)} to ${escapeHtml(targetLabel)}.`
+    : `Upgrading your database from Redis ${escapeHtml(sourceLabel)} to ${escapeHtml(targetLabel)} crosses ${result.entries.length} Redis release${result.entries.length === 1 ? '' : 's'}.`;
+
+  const gapsHtml = result.gaps.length
+    ? `<p class="status-copy breaking-changes-gap"><strong>Heads up:</strong> Redis
+        ${result.gaps.map((family) => escapeHtml(getDatabaseVersionFamilyLabel(family))).join(', ')}
+        ${result.gaps.length === 1 ? 'has' : 'have'} no machine-readable breaking-change list in Pathfinder yet — review
+        <a href="https://github.com/redis/redis/releases" target="_blank" rel="noreferrer">the Redis release notes</a>
+        for ${result.gaps.length === 1 ? 'that version' : 'those versions'} directly.</p>`
+    : '';
+
+  breakingChangesSummary.innerHTML = `
+    <div class="guide-title-row">
+      <h2 id="breaking-changes-summary-title">Database breaking changes</h2>
+    </div>
+    <p class="status-copy">${countLine}</p>
+    ${result.hasData ? `<ul class="breaking-changes-area-list">${areasHtml}</ul>` : ''}
+    ${gapsHtml}
+    <p class="status-copy breaking-changes-pointer">Full command and behavior details appear in the database upgrade step of the upgrade guide.</p>
+  `;
+  breakingChangesSummary.hidden = false;
+}
+
 /* ---------------------------------------------------------------------------
    Initialization
    --------------------------------------------------------------------------- */
@@ -734,6 +809,13 @@ function initialize() {
     result = renderUpgradePathResult(selections);
   } catch (e) {
     document.body.innerHTML += `<pre style="color:red">renderUpgradePathResult error: ${e.message}\n${e.stack}</pre>`;
+    return;
+  }
+
+  try {
+    renderBreakingChangesSummary(selections);
+  } catch (e) {
+    document.body.innerHTML += `<pre style="color:red">renderBreakingChangesSummary error: ${e.message}\n${e.stack}</pre>`;
     return;
   }
 

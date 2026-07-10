@@ -4,9 +4,11 @@ import {
   OS_UPGRADE_DOC_URL,
   OPERATOR_K8S_COMPATIBILITY,
   SUPPORTED_OPERATOR_VERSIONS,
+  clampDatabaseFamily,
   clusterUpgradesModulesImplicitly,
   escapeHtml,
   getClusterVersionFamily,
+  getDatabaseBreakingChanges,
   getOperatorVersionsForK8s,
   getCompatibleModuleVersions,
   getDatabaseUpgradeRequirement,
@@ -26,6 +28,9 @@ import {
 
 const upgradeSummary = document.querySelector('#upgrade-summary');
 const backToResultsButton = document.querySelector('#back-to-results');
+const downloadPdfButton = document.querySelector('#download-pdf');
+const preparedForInput = document.querySelector('#prepared-for');
+const printDocument = document.querySelector('#print-document');
 
 const pathSelectionEl = document.querySelector('#path-selection');
 const pathSelectionContent = document.querySelector('#path-selection-content');
@@ -55,6 +60,78 @@ function labelForOperatingSystem(value) {
 
 function getModuleSelectionCopy(moduleValues) {
   return moduleValues.length ? getModuleSelectionSummary(moduleValues) : 'No modules installed';
+}
+
+// Render the inline markdown the release notes use (`code` spans and
+// [text](url) links) into safe HTML. Everything is HTML-escaped first, then the
+// two markdown forms are converted — so raw note text can never inject markup.
+function renderInlineMarkdown(text) {
+  let html = escapeHtml(text);
+  html = html.replace(
+    /\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g,
+    '<a href="$2" target="_blank" rel="noreferrer">$1</a>',
+  );
+  html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+  return html;
+}
+
+// Detailed CE breaking-changes block for a single database-family jump
+// (fromFamily → toFamily). Returns '' when the jump crosses no tracked
+// families, so callers can inline it unconditionally. Families whose release
+// notes we couldn't scrape are shown with a link out rather than silently
+// omitted, so the step never implies a clean jump by leaving them off.
+function buildDatabaseBreakingChangesHtml(fromFamily, toFamily) {
+  const result = getDatabaseBreakingChanges(fromFamily, toFamily);
+  if (result.entries.length === 0) return '';
+
+  const fromLabel = getDatabaseVersionFamilyLabel(result.sourceFamily);
+  const toLabel = getDatabaseVersionFamilyLabel(result.targetFamily);
+
+  const entriesHtml = result.entries
+    .map((entry) => {
+      const familyLabel = getDatabaseVersionFamilyLabel(entry.family);
+      if (!entry.dataAvailable) {
+        return `
+          <div class="breaking-changes-entry">
+            <h5>Redis ${escapeHtml(familyLabel)}</h5>
+            <p class="status-copy">No breaking-change list is published for this release in
+              Pathfinder yet. Review the
+              <a href="${escapeHtml(entry.source)}" target="_blank" rel="noreferrer">release notes</a>
+              directly before upgrading.</p>
+          </div>
+        `;
+      }
+
+      const itemsHtml = entry.items
+        .map((item) => {
+          const areaHtml = item.area
+            ? `<p class="breaking-changes-area"><strong>${escapeHtml(item.area)}</strong></p>`
+            : '';
+          const notesHtml = item.notes.length > 1
+            ? `<ul>${item.notes.map((note) => `<li>${renderInlineMarkdown(note)}</li>`).join('')}</ul>`
+            : `<p class="status-copy">${renderInlineMarkdown(item.notes[0] ?? '')}</p>`;
+          return areaHtml + notesHtml;
+        })
+        .join('');
+
+      return `
+        <div class="breaking-changes-entry">
+          <h5>Redis ${escapeHtml(familyLabel)} — ${escapeHtml(entry.label ?? 'Breaking changes')}</h5>
+          ${itemsHtml}
+          <a class="breaking-changes-source" href="${escapeHtml(entry.source)}" target="_blank" rel="noreferrer">View on redis.io →</a>
+        </div>
+      `;
+    })
+    .join('');
+
+  return `
+    <section class="wizard-step-breaking-changes">
+      <h4>Redis Community Edition breaking changes (${escapeHtml(fromLabel)} → ${escapeHtml(toLabel)})</h4>
+      <p class="status-copy">Review these command and behavior changes from the Redis open source
+        release notes before upgrading your database, and test affected workloads after the upgrade.</p>
+      ${entriesHtml}
+    </section>
+  `;
 }
 
 function getSupportedOperatingSystemLabels(clusterVersion, platform) {
@@ -98,10 +175,12 @@ function buildModuleVersionListHtml(targetVersion, moduleNames) {
    Summary renderer
    --------------------------------------------------------------------------- */
 
-function renderUpgradeSummary(selections) {
+// Shared environment summary markup, used by the on-screen "Selected inputs"
+// card and the exported PDF so both stay in sync.
+function buildSummaryListHtml(selections) {
   const selectedModules = Array.isArray(selections.modules) ? selections.modules : [];
 
-  upgradeSummary.innerHTML = `
+  return `
     <dl class="results-summary-list">
       <div>
         <dt>Current version</dt>
@@ -115,6 +194,12 @@ function renderUpgradeSummary(selections) {
         <dt>Current database version</dt>
         <dd>${escapeHtml(getDatabaseVersionFamilyLabel(selections.databaseVersion))}</dd>
       </div>
+      ${selections.targetDatabaseVersion ? `
+      <div>
+        <dt>Target database version</dt>
+        <dd>${escapeHtml(getDatabaseVersionFamilyLabel(selections.targetDatabaseVersion))}</dd>
+      </div>
+      ` : ''}
       <div>
         <dt>Deployment platform</dt>
         <dd>${escapeHtml(labelForPlatform(selections.platform))}</dd>
@@ -141,6 +226,10 @@ function renderUpgradeSummary(selections) {
       </div>
     </dl>
   `;
+}
+
+function renderUpgradeSummary(selections) {
+  upgradeSummary.innerHTML = buildSummaryListHtml(selections);
 }
 
 /* ---------------------------------------------------------------------------
@@ -664,6 +753,16 @@ function buildDatabaseUpgradeStep(selections, dbContext = {}) {
   // `rladmin upgrade module`) to pull modules along.
   const modulesUpgradeImplicitly = clusterUpgradesModulesImplicitly(selections.targetVersion);
 
+  // CE breaking changes for this hop's DB jump, capped at the target database
+  // version the user selected so the wizard never reports beyond their intent.
+  const userTargetDbFamily = selections.targetDatabaseVersion
+    ? getDatabaseVersionFamily(selections.targetDatabaseVersion)
+    : '';
+  const breakingToFamily = userTargetDbFamily
+    ? clampDatabaseFamily(targetDbFamily, userTargetDbFamily)
+    : targetDbFamily;
+  const breakingChangesHtml = buildDatabaseBreakingChangesHtml(currentDbFamily, breakingToFamily);
+
   if (selections.activeActive) {
     return {
       title: 'Upgrade Active-Active databases',
@@ -754,6 +853,7 @@ function buildDatabaseUpgradeStep(selections, dbContext = {}) {
             functioning correctly.
           </li>
         </ol>
+        ${breakingChangesHtml}
         <section class="wizard-step-ref">
           <h4>Reference</h4>
           <a href="${escapeHtml(ACTIVE_ACTIVE_UPGRADE_DOC_URL)}" target="_blank" rel="noreferrer">
@@ -929,6 +1029,7 @@ function buildDatabaseUpgradeStep(selections, dbContext = {}) {
           workloads.
         </li>
       </ol>
+      ${breakingChangesHtml}
       <section class="wizard-step-ref">
         <h4>Reference</h4>
         <a href="${escapeHtml(DATABASE_UPGRADE_DOC_URL)}" target="_blank" rel="noreferrer">
@@ -1256,6 +1357,16 @@ function buildK8sDatabaseUpgradeStep(selections, dbContext = {}) {
   // recommendation is available rather than emitting an empty string.
   const redisVersionLiteral = recommendedDbFamily || '&lt;target-redis-version&gt;';
 
+  // CE breaking changes for this hop's DB jump, capped at the target database
+  // version the user selected so the wizard never reports beyond their intent.
+  const userTargetDbFamily = selections.targetDatabaseVersion
+    ? getDatabaseVersionFamily(selections.targetDatabaseVersion)
+    : '';
+  const breakingToFamily = userTargetDbFamily
+    ? clampDatabaseFamily(recommendedDbFamily, userTargetDbFamily)
+    : recommendedDbFamily;
+  const breakingChangesHtml = buildDatabaseBreakingChangesHtml(currentDbFamily, breakingToFamily);
+
   const dbStatusIntroHtml = isPreCluster && status === 'required'
     ? `<p class="status-copy">Current database family
         <strong>${escapeHtml(currentDbLabel)}</strong> is not bundled with
@@ -1330,6 +1441,7 @@ function buildK8sDatabaseUpgradeStep(selections, dbContext = {}) {
             each participating cluster to confirm data consistency and application functionality.
           </li>
         </ol>
+        ${breakingChangesHtml}
         <section class="wizard-step-ref">
           <h4>Reference</h4>
           <a href="${escapeHtml(K8S_UPGRADE_DOC_URL)}" target="_blank" rel="noreferrer">
@@ -1397,6 +1509,7 @@ function buildK8sDatabaseUpgradeStep(selections, dbContext = {}) {
           that applications are functioning correctly.
         </li>
       </ol>
+      ${breakingChangesHtml}
       <section class="wizard-step-ref">
         <h4>Reference</h4>
         <a href="${escapeHtml(K8S_UPGRADE_DOC_URL)}" target="_blank" rel="noreferrer">
@@ -1608,6 +1721,61 @@ function buildWizardSteps(selections, selectedPath) {
   return steps;
 }
 
+// Build the full, single-document version of the guide for PDF export: a cover
+// header, the environment summary, the chosen upgrade path, then every wizard
+// step expanded in order (same {title, html} the on-screen wizard paginates).
+function buildPrintDocumentHtml(selections, selectedPath, steps) {
+  const preparedFor = (preparedForInput?.value ?? '').trim();
+  // Browser context — new Date() is fine here (unlike workflow scripts).
+  const generatedOn = new Date().toISOString().slice(0, 10);
+
+  const path = (selectedPath && selectedPath.length ? selectedPath : [selections.sourceVersion, selections.targetVersion]);
+  const pathHtml = path.length > 2
+    ? path.map((v) => escapeHtml(getClusterVersionLabel(v))).join(' → ')
+    : `${escapeHtml(getClusterVersionLabel(selections.sourceVersion))} → ${escapeHtml(getClusterVersionLabel(selections.targetVersion))} (direct)`;
+
+  const stepsHtml = steps
+    .map((step, i) => `
+      <section class="print-step">
+        <h2 class="print-step-title">Step ${i + 1} · ${escapeHtml(step.title)}</h2>
+        ${step.html}
+      </section>
+    `)
+    .join('');
+
+  return `
+    <header class="print-cover">
+      <img class="print-logo" src="./assets/images/SVG/Redis_Logo_Red_RGB.svg" alt="Redis" />
+      <h1 class="print-title">Redis Enterprise Upgrade Plan</h1>
+      <p class="print-meta">
+        ${preparedFor ? `Prepared for <strong>${escapeHtml(preparedFor)}</strong> · ` : ''}Generated ${escapeHtml(generatedOn)}
+      </p>
+    </header>
+
+    <section class="print-summary">
+      <h2>Your environment</h2>
+      ${buildSummaryListHtml(selections)}
+      <p class="print-path"><strong>Upgrade path:</strong> ${pathHtml}</p>
+    </section>
+
+    <section class="print-steps">
+      ${stepsHtml}
+    </section>
+
+    <footer class="print-footer">
+      Generated by the Redis Enterprise Upgrade Pathfinder. Always verify each step against the
+      current <a href="https://redis.io/docs/latest/operate/rs/installing-upgrading/upgrading/">Redis documentation</a>
+      before making changes in production.
+    </footer>
+  `;
+}
+
+function exportPdf(selections, selectedPath, steps) {
+  if (!printDocument) return;
+  printDocument.innerHTML = buildPrintDocumentHtml(selections, selectedPath, steps);
+  window.print();
+}
+
 function renderWizard(steps) {
   let currentStep = 0;
 
@@ -1748,16 +1916,32 @@ function initialize() {
   const upgradePaths = selections.upgradePaths || [];
   const isDirect = selections.isDirect !== false;
 
+  // The path/steps currently shown, kept current so the PDF export always
+  // matches what's on screen (important for the multi-path selection flow).
+  let activeSelectedPath = null;
+  let activeSteps = null;
+
+  const showWizard = (selectedPath) => {
+    activeSelectedPath = selectedPath;
+    activeSteps = buildWizardSteps(selections, selectedPath);
+    if (downloadPdfButton) downloadPdfButton.disabled = false;
+    renderWizard(activeSteps);
+  };
+
   if (isDirect || upgradePaths.length <= 1) {
     // Direct path or single indirect path — go straight to wizard
-    const selectedPath = upgradePaths[0] || [selections.sourceVersion, selections.targetVersion];
-    const steps = buildWizardSteps(selections, selectedPath);
-    renderWizard(steps);
+    showWizard(upgradePaths[0] || [selections.sourceVersion, selections.targetVersion]);
   } else {
-    // Multiple indirect paths — show path selection UI
-    renderPathSelection(selections, upgradePaths, (selectedPath) => {
-      const steps = buildWizardSteps(selections, selectedPath);
-      renderWizard(steps);
+    // Multiple indirect paths — the guide (and therefore the PDF) isn't defined
+    // until the user picks one, so keep export disabled until then.
+    if (downloadPdfButton) downloadPdfButton.disabled = true;
+    renderPathSelection(selections, upgradePaths, showWizard);
+  }
+
+  if (downloadPdfButton) {
+    downloadPdfButton.addEventListener('click', () => {
+      if (!activeSteps) return;
+      exportPdf(selections, activeSelectedPath, activeSteps);
     });
   }
 

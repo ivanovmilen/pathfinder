@@ -28,6 +28,15 @@
             </p>
           </div>
           <div class="results-actions">
+            <input
+              id="prepared-for"
+              class="prepared-for-input"
+              type="text"
+              maxlength="80"
+              placeholder="Customer name (optional)"
+              aria-label="Customer name for the exported PDF"
+            />
+            <button id="download-pdf" class="secondary-button" type="button">Download PDF</button>
             <button id="back-to-results" class="secondary-button" type="button">← Back to results</button>
           </div>
         </section>
@@ -62,6 +71,10 @@
         </section>
       </section>
     </main>
+
+    <!-- Print-only document. Populated by upgrade.js when the user exports a PDF;
+         hidden on screen and shown only under @media print (see styles.css). -->
+    <div id="print-document" aria-hidden="true"></div>
 
     <script type="module" src="upgrade.js"></script>
     <!-- feedback-form-trial: remove this line to disable the feedback widget -->

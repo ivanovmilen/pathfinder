@@ -21,6 +21,7 @@ const formControls = {
   sourceVersion: document.querySelector('#source-version'),
   targetVersion: document.querySelector('#target-version'),
   databaseVersion: document.querySelector('#database-version'),
+  targetDatabaseVersion: document.querySelector('#target-database-version'),
   activeActive: document.querySelector('#active-active'),
   modules: document.querySelector('#installed-modules'),
   // operatingSystem is null on kubernetes.html (field not present)
@@ -45,6 +46,7 @@ const PLACEHOLDER_LABELS = {
   sourceVersion: 'Select current version',
   targetVersion: 'Select target version',
   databaseVersion: 'Select current database version',
+  targetDatabaseVersion: 'Select target database version',
   platform: 'Select deployment platform',
   k8sDistribution: 'Select Kubernetes distribution',
   k8sVersion: 'Select Kubernetes version',
@@ -56,6 +58,7 @@ const FIELD_LABELS = {
   sourceVersion: 'Current version',
   targetVersion: 'Target version',
   databaseVersion: 'Current database version',
+  targetDatabaseVersion: 'Target database version',
   platform: 'Deployment platform',
   k8sDistribution: 'Kubernetes distribution',
   operatingSystem: 'Operating system',
@@ -217,6 +220,49 @@ function syncDatabaseVersionOptions() {
   );
 }
 
+// Target database options are the families bundled with the chosen target
+// cluster version that are not older than the current database family — you
+// can only run a DB version your target cluster ships, and Pathfinder never
+// models a database downgrade.
+function getTargetDatabaseOptions(targetVersion, currentDatabaseVersion) {
+  if (!targetVersion) {
+    return [];
+  }
+
+  const currentFamily = currentDatabaseVersion
+    ? getDatabaseVersionFamily(currentDatabaseVersion)
+    : '';
+
+  return OPTIONS.databaseVersions.filter((option) => {
+    const family = getOptionValue(option);
+    if (!getDatabaseCompatibility(targetVersion, family).supported) return false;
+    if (currentFamily && compareVersions(family, currentFamily) < 0) return false;
+    return true;
+  });
+}
+
+function syncTargetDatabaseVersionOptions() {
+  if (!formControls.targetDatabaseVersion) return;
+
+  const availableOptions = getTargetDatabaseOptions(
+    formControls.targetVersion.value,
+    formControls.databaseVersion.value,
+  );
+  const currentTargetDatabaseVersion = formControls.targetDatabaseVersion.value;
+  const selectedTargetDatabaseVersion = availableOptions.some(
+    (option) => getOptionValue(option) === currentTargetDatabaseVersion,
+  )
+    ? currentTargetDatabaseVersion
+    : '';
+
+  populateSelect(
+    formControls.targetDatabaseVersion,
+    availableOptions,
+    selectedTargetDatabaseVersion,
+    PLACEHOLDER_LABELS.targetDatabaseVersion,
+  );
+}
+
 function isK8sPlatformSelected() {
   // On the kubernetes page there is no platform toggle — the k8s distribution
   // IS the platform, so we're always in "k8s mode" when a distribution is
@@ -360,6 +406,7 @@ function syncModuleOptions() {
 function syncSourceAwareOptions() {
   syncTargetVersionOptions();
   syncDatabaseVersionOptions();
+  syncTargetDatabaseVersionOptions();
   syncOperatingSystemOptions();
   syncModuleOptions();
   syncK8sVersionOptions();
@@ -370,6 +417,7 @@ function getSelections() {
     sourceVersion: formControls.sourceVersion.value,
     targetVersion: formControls.targetVersion.value,
     databaseVersion: formControls.databaseVersion.value,
+    targetDatabaseVersion: formControls.targetDatabaseVersion?.value ?? '',
     activeActive: formControls.activeActive.checked,
     modules: getSelectedModuleValues(),
     // operatingSystem is absent on kubernetes.html — fall back to empty string
@@ -404,7 +452,7 @@ function getMissingSelections(selections) {
   const missing = [];
 
   // Standard version fields are always required
-  const standardFields = ['sourceVersion', 'targetVersion', 'databaseVersion'];
+  const standardFields = ['sourceVersion', 'targetVersion', 'databaseVersion', 'targetDatabaseVersion'];
   for (const key of standardFields) {
     if (!selections[key]) missing.push(FIELD_LABELS[key]);
   }
@@ -545,6 +593,15 @@ function restoreFormFromStorage() {
     syncModuleOptions();
   }
 
+  // Target DB options depend on both the target cluster version and the current
+  // database family, so re-sync now that both have been restored above.
+  if (formControls.targetDatabaseVersion) {
+    syncTargetDatabaseVersionOptions();
+    if (selections.targetDatabaseVersion) {
+      formControls.targetDatabaseVersion.value = selections.targetDatabaseVersion;
+    }
+  }
+
   if (selections.platform) {
     if (IS_K8S_PAGE) {
       // On the kubernetes page, selections.platform already holds the k8s
@@ -620,7 +677,13 @@ function initialize() {
   restoreFormFromStorage();
 
   formControls.sourceVersion.addEventListener('change', syncSourceAwareOptions);
-  formControls.databaseVersion.addEventListener('change', syncModuleOptions);
+  formControls.databaseVersion.addEventListener('change', () => {
+    syncModuleOptions();
+    // The current database family is the floor for target DB options.
+    syncTargetDatabaseVersionOptions();
+  });
+  // Target cluster version determines which DB families are bundled/offered.
+  formControls.targetVersion.addEventListener('change', syncTargetDatabaseVersionOptions);
   // platform listener is absent on kubernetes.html
   formControls.platform?.addEventListener('change', syncPlatformFields);
   formControls.k8sDistribution?.addEventListener('change', syncK8sVersionOptions);

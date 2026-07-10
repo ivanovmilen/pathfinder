@@ -2,6 +2,7 @@ export const DEFAULT_SELECTIONS = {
   sourceVersion: '7.22',
   targetVersion: '8.0.10',
   databaseVersion: '7.4',
+  targetDatabaseVersion: '8.0',
   modules: 'none',
   operatingSystem: 'ubuntu-20.04',
   platform: 'vms',
@@ -597,6 +598,138 @@ export function getDatabaseUpgradeRequirement(currentDatabaseFamily, targetClust
     return { status: 'none', recommended, currentDatabaseFamily };
   }
   return { status: 'recommended', recommended, currentDatabaseFamily };
+}
+
+// Redis Community Edition breaking changes by database version family.
+// Source: https://redis.io/docs/latest/develop/whats-new/<version>/
+// dataAvailable=false means no breaking-change section was published for
+// that family (or the family predates the whats-new pages) — the app must
+// say "no data for this range" rather than imply the jump is clean.
+// Regenerate with: ./_parse_ce_breaking_changes.py
+export const DATABASE_BREAKING_CHANGES = {
+  '6.0': {
+    source: 'https://redis.io/docs/latest/develop/get-started/',
+    label: null,
+    dataAvailable: false,
+    items: [],
+  },
+  '6.2': {
+    source: 'https://redis.io/docs/latest/develop/get-started/',
+    label: null,
+    dataAvailable: false,
+    items: [],
+  },
+  '7.2': {
+    source: 'https://redis.io/docs/latest/develop/whats-new/7-2/#breaking-changes',
+    label: 'Breaking changes',
+    dataAvailable: true,
+    items: [
+      { area: null, notes: ['Redis 7.2 introduces several backward-incompatible changes. Lua scripts no longer support the `print()` function, blocking of `PFCOUNT` and `PUBLISH` in read-only scripts, and time sampling freezing during command execution. Error handling updates include case changes in error responses, new behavior for `ZPOPMIN/ZPOPMAX` with `count 0`, and adjustments to `XCLAIM/XAUTOCLAIM`. ACL changes affect command categorization and key access permissions, while command introspection now includes per-subcommand statistics. Redis now allows certain `CONFIG` commands during loading and tracks statistics only when commands are executed.'] },
+    ],
+  },
+  '7.4': {
+    source: 'https://redis.io/docs/latest/develop/whats-new/7-4/#breaking-changes',
+    label: 'Behavior changes',
+    dataAvailable: true,
+    items: [
+      { area: null, notes: ['Redis 7.4 includes behavior changes such as using jemalloc instead of libc for allocating Lua VM code. This adjustment reduces memory fragmentation and improves performance. Additionally, the `ACL LOAD` command has been modified to ensure that only clients with affected user configurations are disconnected, reducing unnecessary disruptions.'] },
+    ],
+  },
+  '8.0': {
+    source: 'https://redis.io/docs/latest/develop/whats-new/8-0/#breaking-changes',
+    label: 'Breaking changes',
+    dataAvailable: true,
+    items: [
+      { area: 'ACL behavior', notes: ['Commands from included modules are now covered under standard categories (e.g., `+@read`, `+@write`). For example, a user with `+@all` `-@write` will no longer be able to execute `JSON.SET` as they could before.', 'Explicit inclusion of new command categories is required to maintain access.'] },
+      { area: 'Redis Search', notes: ['The following changes affect behavior and validation in Redis Search:', 'Enforces validation for `LIMIT` arguments (offset must be 0 if limit is 0).', 'Enforces parsing rules for `FT.CURSOR READ` and `FT.ALIASADD`.', 'Parentheses are now required for exponentiation precedence in `APPLY` expressions.', 'Invalid input now returns errors instead of empty results.', 'Default values revisited for reducers like `AVG`, `COUNT`, `SUM`, `STDDEV`, `QUANTILE`, and others.', 'Updates to scoring (`BM25` is now the default instead of `TF-IDF`).', 'Improved handling of expired records, memory constraints, and malformed fields.', 'For a full list of Redis Search-related changes, see the [release notes](https://github.com/redis/redis/releases).'] },
+    ],
+  },
+  '8.2': {
+    source: 'https://redis.io/docs/latest/develop/whats-new/8-2/#breaking-changes',
+    label: null,
+    dataAvailable: false,
+    items: [],
+  },
+  '8.4': {
+    source: 'https://redis.io/docs/latest/develop/whats-new/8-4/#breaking-changes',
+    label: null,
+    dataAvailable: false,
+    items: [],
+  },
+};
+
+// Return whichever database family is not newer than the other, per
+// DATABASE_FAMILY_ORDER. Used to cap a wizard hop's breaking-changes range at
+// the target database version the user actually selected, so the wizard never
+// reports changes beyond where the user intends to land. Unknown families fall
+// back to `family`.
+export function clampDatabaseFamily(family, maxFamily) {
+  const familyIdx = DATABASE_FAMILY_ORDER.indexOf(family);
+  const maxIdx = DATABASE_FAMILY_ORDER.indexOf(maxFamily);
+  if (familyIdx === -1 || maxIdx === -1) return family;
+  return familyIdx <= maxIdx ? family : maxFamily;
+}
+
+// Collect the CE breaking changes introduced across a database-family jump.
+// Returns every family in the half-open interval (source, target] — i.e. each
+// family the user crosses INTO, excluding the one they start on. Families whose
+// release notes we couldn't scrape are surfaced via `gaps` so the UI can warn
+// rather than imply the jump is clean. When target <= source (no DB upgrade),
+// returns an empty result.
+export function getDatabaseBreakingChanges(sourceDatabaseVersion, targetDatabaseVersion) {
+  const sourceFamily = getDatabaseVersionFamily(sourceDatabaseVersion);
+  const targetFamily = getDatabaseVersionFamily(targetDatabaseVersion);
+  const sourceIdx = DATABASE_FAMILY_ORDER.indexOf(sourceFamily);
+  const targetIdx = DATABASE_FAMILY_ORDER.indexOf(targetFamily);
+
+  const empty = {
+    sourceFamily,
+    targetFamily,
+    entries: [],
+    affectedAreas: [],
+    itemCount: 0,
+    hasData: false,
+    gaps: [],
+  };
+
+  if (sourceIdx === -1 || targetIdx === -1 || targetIdx <= sourceIdx) {
+    return empty;
+  }
+
+  const entries = [];
+  const affectedAreas = [];
+  const gaps = [];
+  let itemCount = 0;
+
+  for (let i = sourceIdx + 1; i <= targetIdx; i += 1) {
+    const family = DATABASE_FAMILY_ORDER[i];
+    const record = DATABASE_BREAKING_CHANGES[family];
+    if (!record) continue;
+
+    const entry = { family, ...record };
+    entries.push(entry);
+
+    if (!record.dataAvailable) {
+      gaps.push(family);
+      continue;
+    }
+    record.items.forEach((item) => {
+      itemCount += 1;
+      // area is null for prose-only entries (e.g. 7.2, 7.4) — the UI decides how
+      // to label those rather than baking a family string in here.
+      affectedAreas.push({ family, area: item.area });
+    });
+  }
+
+  return {
+    sourceFamily,
+    targetFamily,
+    entries,
+    affectedAreas,
+    itemCount,
+    hasData: itemCount > 0,
+    gaps,
+  };
 }
 
 
