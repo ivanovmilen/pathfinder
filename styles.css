@@ -1249,11 +1249,22 @@ code {
 
   #print-document {
     display: block;
+    /* Page margins live here instead of @page (see below). Horizontal padding
+       applies on every page; box-decoration-break: clone repeats the vertical
+       padding on every page fragment too (engines that don't support it fall
+       back to first/last page only). */
+    padding: 16mm 14mm;
+    box-decoration-break: clone;
+    -webkit-box-decoration-break: clone;
   }
 
   @page {
     size: A4;
-    margin: 16mm 14mm;
+    /* Zero page margin suppresses the browser's print header/footer (date,
+       page title, URL, page number) — browsers draw those inside the page
+       margin area, so with no margin there is nowhere to render them. The
+       content margins are provided by #print-document padding above. */
+    margin: 0;
   }
 
   .print-cover {
