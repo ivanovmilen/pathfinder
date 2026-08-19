@@ -25,7 +25,7 @@ is clean. Families with no page at all (6.0, 6.2 predate these pages) are
 listed in NO_PAGE_FAMILIES and emitted the same way.
 
 Run:  ./_parse_ce_breaking_changes.py
-Or:   curl ... | ./_parse_ce_breaking_changes.py   (single page on stdin)
+Or:   curl ... | ./_parse_ce_breaking_changes.py -   (single page on stdin)
 """
 import re
 import subprocess
@@ -60,16 +60,17 @@ LIST_MARKER = re.compile(r'^\s*[-*]\s+')
 
 
 def read_stdin():
-    """Return piped markdown, or '' when nothing was piped.
+    """Return piped markdown when `-`/`--stdin` is passed, else ''.
 
-    Reads stdin only when it isn't a TTY *and* actually carries data — a bare
-    non-interactive shell (stdin on /dev/null) must fall through to curl, not
-    be mistaken for a single piped page.
+    stdin is opt-in. Auto-reading it whenever it isn't a TTY blocks forever when
+    stdin is an open pipe with no writer (CI runners, cron, agent shells), because
+    read() waits for an EOF that never comes. Requiring an explicit `-`/`--stdin`
+    keeps a bare `./_parse_ce_breaking_changes.py` non-blocking and defaulting to
+    curl.
     """
-    if sys.stdin.isatty():
-        return ''
-    data = sys.stdin.read()
-    return data if data.strip() else ''
+    if '-' in sys.argv[1:] or '--stdin' in sys.argv[1:]:
+        return sys.stdin.read()
+    return ''
 
 
 def fetch(slug):

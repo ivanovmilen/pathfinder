@@ -26,14 +26,11 @@ const formControls = {
   modules: document.querySelector('#installed-modules'),
   // operatingSystem is null on kubernetes.html (field not present)
   operatingSystem: document.querySelector('#operating-system'),
-  // platform is null on kubernetes.html (field not present)
-  platform: document.querySelector('#deployment-platform'),
   k8sDistribution: document.querySelector('#k8s-distribution'),
   // k8sVersion is null on redis-software.html (field not present)
   k8sVersion: document.querySelector('#k8s-version'),
 };
 
-const osFieldWrapper = document.querySelector('#os-field');
 const k8sDistributionFieldWrapper = document.querySelector('#k8s-distribution-field');
 const k8sVersionFieldWrapper = document.querySelector('#k8s-version-field');
 
@@ -47,7 +44,6 @@ const PLACEHOLDER_LABELS = {
   targetVersion: 'Select target version',
   databaseVersion: 'Select current database version',
   targetDatabaseVersion: 'Select target database version',
-  platform: 'Select deployment platform',
   k8sDistribution: 'Select Kubernetes distribution',
   k8sVersion: 'Select Kubernetes version',
   operatingSystem: 'Select operating system',
@@ -59,7 +55,6 @@ const FIELD_LABELS = {
   targetVersion: 'Target version',
   databaseVersion: 'Current database version',
   targetDatabaseVersion: 'Target database version',
-  platform: 'Deployment platform',
   k8sDistribution: 'Kubernetes distribution',
   operatingSystem: 'Operating system',
   modules: 'Installed modules',
@@ -263,27 +258,13 @@ function syncTargetDatabaseVersionOptions() {
   );
 }
 
-function isK8sPlatformSelected() {
-  // On the kubernetes page there is no platform toggle — the k8s distribution
-  // IS the platform, so we're always in "k8s mode" when a distribution is
-  // selected (or even before one is selected, the page is k8s-only).
-  if (IS_K8S_PAGE) return true;
-  return formControls.platform?.value === 'kubernetes';
-}
-
 function getEffectivePlatform() {
   if (IS_K8S_PAGE) {
     // The k8s distribution select is the sole platform selector on this page.
     return formControls.k8sDistribution?.value ?? '';
   }
   // redis-software.html has no platform selector — it is always VM/Bare Metal.
-  if (!formControls.platform) {
-    return 'vms';
-  }
-  if (formControls.platform.value === 'kubernetes') {
-    return formControls.k8sDistribution?.value ?? '';
-  }
-  return formControls.platform.value;
+  return 'vms';
 }
 
 function syncOperatingSystemOptions() {
@@ -310,12 +291,10 @@ function syncK8sVersionOptions() {
   // redis-software.html has no k8s version field — skip silently.
   if (!formControls.k8sVersion) return;
 
-  // On the kubernetes page the distribution IS the platform selector.
-  // On the redis-software page (when kubernetes is selected), check platform.
-  const hasDistribution = Boolean(formControls.k8sDistribution?.value);
-  const isK8s = IS_K8S_PAGE
-    ? hasDistribution
-    : (formControls.platform?.value === 'kubernetes' && hasDistribution);
+  // The distribution field only exists on the kubernetes page, and there it IS
+  // the platform selector. The redis-software page has no k8s version field, so
+  // this function already returned above via the formControls.k8sVersion guard.
+  const isK8s = IS_K8S_PAGE && Boolean(formControls.k8sDistribution?.value);
   const sourceVersion = formControls.sourceVersion.value;
 
   if (!isK8s || !sourceVersion) {
@@ -340,43 +319,6 @@ function syncK8sVersionOptions() {
 
   if (k8sVersionFieldWrapper) k8sVersionFieldWrapper.hidden = false;
   populateSelect(formControls.k8sVersion, availableVersions, selectedVersion, PLACEHOLDER_LABELS.k8sVersion);
-}
-
-function syncPlatformFields() {
-  if (IS_K8S_PAGE) {
-    // On the kubernetes page the distribution field is always visible and there
-    // is no platform toggle or OS field to manage — just keep k8s version in sync.
-    syncK8sVersionOptions();
-    return;
-  }
-
-  const platformValue = formControls.platform?.value ?? '';
-  const k8s = platformValue === 'kubernetes';
-
-  // K8s distribution dropdown — visible only when Kubernetes is selected
-  if (k8sDistributionFieldWrapper) {
-    k8sDistributionFieldWrapper.hidden = !k8s;
-  }
-  if (formControls.k8sDistribution) {
-    formControls.k8sDistribution.disabled = !k8s;
-    if (!k8s) formControls.k8sDistribution.value = '';
-  }
-
-  // OS dropdown — hidden only when Kubernetes is selected, visible otherwise
-  if (osFieldWrapper) {
-    osFieldWrapper.hidden = k8s;
-  }
-  if (formControls.operatingSystem) {
-    formControls.operatingSystem.disabled = k8s;
-    if (k8s) {
-      formControls.operatingSystem.value = '';
-    } else {
-      // Re-populate OS options when switching back from K8s to ensure they are available
-      syncOperatingSystemOptions();
-    }
-  }
-
-  syncK8sVersionOptions();
 }
 
 function syncModuleOptions() {
@@ -448,7 +390,6 @@ function renderEmptyState(message, missingFields = []) {
 }
 
 function getMissingSelections(selections) {
-  const k8sSelected = isK8sPlatformSelected();
   const missing = [];
 
   // Standard version fields are always required
@@ -463,19 +404,9 @@ function getMissingSelections(selections) {
       missing.push(FIELD_LABELS.k8sDistribution);
     }
   } else {
-    // Platform selector is absent on redis-software.html (hardcoded to 'vms').
-    // Only validate it when the control is actually present in the DOM.
-    if (formControls.platform) {
-      if (!formControls.platform.value) {
-        missing.push(FIELD_LABELS.platform);
-      } else if (k8sSelected && !formControls.k8sDistribution?.value) {
-        // K8s distribution is required when Kubernetes is selected as platform
-        missing.push(FIELD_LABELS.k8sDistribution);
-      }
-    }
-
-    // OS is required for non-K8s platforms
-    if (!k8sSelected && !selections.operatingSystem) {
+    // redis-software.html has no platform selector (always VMs/Bare Metal), so
+    // the operating system is always required.
+    if (!selections.operatingSystem) {
       missing.push(FIELD_LABELS.operatingSystem);
     }
   }
@@ -602,36 +533,14 @@ function restoreFormFromStorage() {
     }
   }
 
-  if (selections.platform) {
-    if (IS_K8S_PAGE) {
-      // On the kubernetes page, selections.platform already holds the k8s
-      // distribution value (e.g. 'kubernetes-openshift') — restore it directly.
-      if (formControls.k8sDistribution) {
-        formControls.k8sDistribution.value = selections.platform;
-        syncK8sVersionOptions();
-        if (selections.k8sVersion && formControls.k8sVersion) {
-          formControls.k8sVersion.value = selections.k8sVersion;
-        }
-      }
-    } else if (isK8sPlatform(selections.platform)) {
-      // Two-level restore on redis-software page: set platform to 'kubernetes',
-      // then restore the specific distribution.
-      if (formControls.platform) {
-        formControls.platform.value = 'kubernetes';
-        syncPlatformFields();
-      }
-      if (formControls.k8sDistribution) {
-        formControls.k8sDistribution.value = selections.platform;
-        syncK8sVersionOptions();
-        if (selections.k8sVersion && formControls.k8sVersion) {
-          formControls.k8sVersion.value = selections.k8sVersion;
-        }
-      }
-    } else {
-      if (formControls.platform) {
-        formControls.platform.value = selections.platform;
-        syncPlatformFields();
-      }
+  // Only the kubernetes page has a platform control to restore — there,
+  // selections.platform holds the k8s distribution value (e.g.
+  // 'kubernetes-openshift'). redis-software.html is always VMs/Bare Metal.
+  if (selections.platform && IS_K8S_PAGE && formControls.k8sDistribution) {
+    formControls.k8sDistribution.value = selections.platform;
+    syncK8sVersionOptions();
+    if (selections.k8sVersion && formControls.k8sVersion) {
+      formControls.k8sVersion.value = selections.k8sVersion;
     }
   }
 
@@ -659,10 +568,6 @@ function restoreFormFromStorage() {
 function initialize() {
   populateSelect(formControls.sourceVersion, OPTIONS.sourceVersions, '', PLACEHOLDER_LABELS.sourceVersion);
   populateSelect(formControls.targetVersion, OPTIONS.targetVersions, '', PLACEHOLDER_LABELS.targetVersion);
-  // platform select is absent on kubernetes.html
-  if (formControls.platform) {
-    populateSelect(formControls.platform, OPTIONS.platforms, '', PLACEHOLDER_LABELS.platform);
-  }
   if (formControls.k8sDistribution) {
     populateSelect(formControls.k8sDistribution, OPTIONS.k8sDistributions, '', PLACEHOLDER_LABELS.k8sDistribution);
   }
@@ -684,8 +589,6 @@ function initialize() {
   });
   // Target cluster version determines which DB families are bundled/offered.
   formControls.targetVersion.addEventListener('change', syncTargetDatabaseVersionOptions);
-  // platform listener is absent on kubernetes.html
-  formControls.platform?.addEventListener('change', syncPlatformFields);
   formControls.k8sDistribution?.addEventListener('change', syncK8sVersionOptions);
   updateGuideButton.addEventListener('click', render);
   renderEmptyState();

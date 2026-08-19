@@ -19,7 +19,7 @@ version reads the column-to-operator mapping from each table-part header row,
 so adding 8.0.18-11 (or any future patch) requires no script changes.
 
 Run:  ./_parse_k8s_matrix.py
-Or:   curl ... | ./_parse_k8s_matrix.py
+Or:   curl ... | ./_parse_k8s_matrix.py -   (feed a single page on stdin)
 """
 import collections
 import os
@@ -83,13 +83,13 @@ OPERATOR_RE = re.compile(r'(\d+\.\d+\.\d+-\d+)')
 
 
 def fetch():
-    # Use stdin only when something is actually piped in. The previous version
-    # read stdin whenever it wasn't a TTY, which silently produced empty output
-    # when invoked under non-interactive shells (stdin connected to /dev/null).
-    if not sys.stdin.isatty():
-        data = sys.stdin.read()
-        if data.strip():
-            return data
+    # stdin is opt-in: pass `-` or `--stdin` to feed a single page in. Auto-reading
+    # stdin whenever it isn't a TTY blocks forever when stdin is an open pipe with
+    # no writer (CI runners, cron, agent shells), because read() waits for an EOF
+    # that never comes. Defaulting to curl keeps a bare `./_parse_k8s_matrix.py`
+    # non-blocking in every environment.
+    if '-' in sys.argv[1:] or '--stdin' in sys.argv[1:]:
+        return sys.stdin.read()
     result = subprocess.run(['curl', '-sL', DOCS_URL], capture_output=True, text=True)
     return result.stdout
 

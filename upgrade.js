@@ -1,14 +1,12 @@
 import {
   ACTIVE_ACTIVE_UPGRADE_DOC_URL,
-  OPTIONS,
   OS_UPGRADE_DOC_URL,
-  OPERATOR_K8S_COMPATIBILITY,
-  SUPPORTED_OPERATOR_VERSIONS,
+  buildEnvironmentSummaryHtml,
   clampDatabaseFamily,
   clusterUpgradesModulesImplicitly,
   escapeHtml,
-  getClusterVersionFamily,
   getDatabaseBreakingChanges,
+  getNewestOperatorForClusterVersion,
   getOperatorVersionsForK8s,
   getCompatibleModuleVersions,
   getDatabaseUpgradeRequirement,
@@ -17,13 +15,15 @@ import {
   getClusterVersionLabel,
   getModuleEntries,
   getModuleLabel,
-  getModuleSelectionSummary,
   getPlatformSupport,
   getPreClusterUpgradeDatabaseFamily,
   getRecommendedTargetDatabaseFamily,
   getSupportedOperatingSystemOptions,
   isInDownloadCenter,
   isK8sPlatform,
+  labelForOperatingSystem,
+  labelForPlatform,
+  operatorSupportsK8sVersion,
 } from './upgrade-data.js';
 
 const upgradeSummary = document.querySelector('#upgrade-summary');
@@ -44,23 +44,6 @@ const wizardPrevButton = document.querySelector('#wizard-prev');
 const wizardNextButton = document.querySelector('#wizard-next');
 
 const STORAGE_KEY = 'pathfinder_selections';
-
-function labelForPlatform(value) {
-  if (value === 'vms' || value === 'bare-metal') return 'VMs and Bare Metal';
-  if (value === 'kubernetes-community') return 'Kubernetes';
-  if (value === 'kubernetes-openshift') return 'OpenShift';
-  return OPTIONS.platforms.find((option) => option.value === value)?.label
-    ?? OPTIONS.k8sDistributions.find((option) => option.value === value)?.label
-    ?? value;
-}
-
-function labelForOperatingSystem(value) {
-  return OPTIONS.operatingSystems.find((option) => option.value === value)?.label ?? value;
-}
-
-function getModuleSelectionCopy(moduleValues) {
-  return moduleValues.length ? getModuleSelectionSummary(moduleValues) : 'No modules installed';
-}
 
 // Render the inline markdown the release notes use (`code` spans and
 // [text](url) links) into safe HTML. Everything is HTML-escaped first, then the
@@ -175,61 +158,8 @@ function buildModuleVersionListHtml(targetVersion, moduleNames) {
    Summary renderer
    --------------------------------------------------------------------------- */
 
-// Shared environment summary markup, used by the on-screen "Selected inputs"
-// card and the exported PDF so both stay in sync.
-function buildSummaryListHtml(selections) {
-  const selectedModules = Array.isArray(selections.modules) ? selections.modules : [];
-
-  return `
-    <dl class="results-summary-list">
-      <div>
-        <dt>Current version</dt>
-        <dd>${escapeHtml(getClusterVersionLabel(selections.sourceVersion))}</dd>
-      </div>
-      <div>
-        <dt>Target version</dt>
-        <dd>${escapeHtml(getClusterVersionLabel(selections.targetVersion))}</dd>
-      </div>
-      <div>
-        <dt>Current database version</dt>
-        <dd>${escapeHtml(getDatabaseVersionFamilyLabel(selections.databaseVersion))}</dd>
-      </div>
-      ${selections.targetDatabaseVersion ? `
-      <div>
-        <dt>Target database version</dt>
-        <dd>${escapeHtml(getDatabaseVersionFamilyLabel(selections.targetDatabaseVersion))}</dd>
-      </div>
-      ` : ''}
-      <div>
-        <dt>Deployment platform</dt>
-        <dd>${escapeHtml(labelForPlatform(selections.platform))}</dd>
-      </div>
-      ${isK8sPlatform(selections.platform) && selections.k8sVersion ? `
-      <div>
-        <dt>${selections.platform === 'kubernetes-openshift' ? 'OpenShift version' : 'Kubernetes version'}</dt>
-        <dd>${escapeHtml(selections.k8sVersion)}</dd>
-      </div>
-      ` : ''}
-      ${isK8sPlatform(selections.platform) ? '' : `
-      <div>
-        <dt>Operating system</dt>
-        <dd>${escapeHtml(labelForOperatingSystem(selections.operatingSystem))}</dd>
-      </div>
-      `}
-      <div>
-        <dt>Installed modules</dt>
-        <dd>${escapeHtml(getModuleSelectionCopy(selectedModules))}</dd>
-      </div>
-      <div>
-        <dt>Active-Active (CRDB)</dt>
-        <dd>${selections.activeActive ? 'Yes' : 'No'}</dd>
-      </div>
-    </dl>
-  `;
-}
-
 function renderUpgradeSummary(selections) {
-  upgradeSummary.innerHTML = buildSummaryListHtml(selections);
+  upgradeSummary.innerHTML = buildEnvironmentSummaryHtml(selections);
 }
 
 /* ---------------------------------------------------------------------------
@@ -270,22 +200,16 @@ function buildPreUpgradeStep(selections) {
     const k8sVersionLabel = selections.platform === 'kubernetes-openshift' ? 'OpenShift version' : 'Kubernetes version';
 
     // --- Source-family check ---
-    const sourceFamily = getClusterVersionFamily(selections.sourceVersion);
-    const newestSourceOperator = SUPPORTED_OPERATOR_VERSIONS.find(
-      (v) => v.startsWith(sourceFamily + '.')
+    const newestSourceOperator = getNewestOperatorForClusterVersion(selections.sourceVersion);
+    const newestSourceSupportsK8s = operatorSupportsK8sVersion(
+      newestSourceOperator, selections.platform, selections.k8sVersion,
     );
-    const newestSourceSupportsK8s = newestSourceOperator
-      ? (OPERATOR_K8S_COMPATIBILITY[newestSourceOperator]?.[selections.platform] ?? []).includes(selections.k8sVersion)
-      : true; // no data → suppress warning
 
     // --- Target-family check ---
-    const targetFamily = getClusterVersionFamily(selections.targetVersion);
-    const newestTargetOperator = SUPPORTED_OPERATOR_VERSIONS.find(
-      (v) => v.startsWith(targetFamily + '.')
+    const newestTargetOperator = getNewestOperatorForClusterVersion(selections.targetVersion);
+    const newestTargetSupportsK8s = operatorSupportsK8sVersion(
+      newestTargetOperator, selections.platform, selections.k8sVersion,
     );
-    const newestTargetSupportsK8s = newestTargetOperator
-      ? (OPERATOR_K8S_COMPATIBILITY[newestTargetOperator]?.[selections.platform] ?? []).includes(selections.k8sVersion)
-      : true; // no data → suppress warning
 
     if (newestSourceOperator && !newestSourceSupportsK8s) {
       k8sVersionWarningHtml += `
@@ -741,7 +665,11 @@ function buildDatabaseUpgradeStep(selections, dbContext = {}) {
   const currentDbFamily = dbContext.currentDbFamily
     ?? getDatabaseVersionFamily(selections.databaseVersion);
   const currentDbLabel = getDatabaseVersionFamilyLabel(currentDbFamily);
-  const dbReq = getDatabaseUpgradeRequirement(currentDbFamily, selections.targetVersion);
+  // Never recommend past the database family the user selected as their target.
+  const userTargetDbFamily = selections.targetDatabaseVersion
+    ? getDatabaseVersionFamily(selections.targetDatabaseVersion)
+    : '';
+  const dbReq = getDatabaseUpgradeRequirement(currentDbFamily, selections.targetVersion, userTargetDbFamily);
   const status = dbContext.status ?? dbReq.status;
   const isPreCluster = dbContext.isPreCluster ?? false;
   const targetDbFamily = dbContext.targetDbFamily || dbReq.recommended;
@@ -755,9 +683,6 @@ function buildDatabaseUpgradeStep(selections, dbContext = {}) {
 
   // CE breaking changes for this hop's DB jump, capped at the target database
   // version the user selected so the wizard never reports beyond their intent.
-  const userTargetDbFamily = selections.targetDatabaseVersion
-    ? getDatabaseVersionFamily(selections.targetDatabaseVersion)
-    : '';
   const breakingToFamily = userTargetDbFamily
     ? clampDatabaseFamily(targetDbFamily, userTargetDbFamily)
     : targetDbFamily;
@@ -1136,24 +1061,17 @@ function buildK8sClusterUpgradeHtml(sourceLabel, targetLabel, method, platform, 
     ? getOperatorVersionsForK8s(sourceVersion, k8sVersion, platform)
     : [];
 
-  // Find the newest operator in each family (first match — array is ordered newest-first).
-  const sourceFamily = getClusterVersionFamily(sourceVersion);
-  const targetFamily = getClusterVersionFamily(targetVersion);
+  // Find the newest operator in each family (array is ordered newest-first).
   const newestSourceOperator = isRelevantPlatform
-    ? SUPPORTED_OPERATOR_VERSIONS.find((v) => v.startsWith(sourceFamily + '.'))
+    ? getNewestOperatorForClusterVersion(sourceVersion)
     : undefined;
 
   const newestTargetOperator = isRelevantPlatform
-    ? SUPPORTED_OPERATOR_VERSIONS.find((v) => v.startsWith(targetFamily + '.'))
+    ? getNewestOperatorForClusterVersion(targetVersion)
     : undefined;
 
-  const newestSourceSupportsK8s = newestSourceOperator && k8sVersion
-    ? (OPERATOR_K8S_COMPATIBILITY[newestSourceOperator]?.[platform] ?? []).includes(k8sVersion)
-    : true; // no data → suppress warning
-
-  const newestTargetSupportsK8s = newestTargetOperator && k8sVersion
-    ? (OPERATOR_K8S_COMPATIBILITY[newestTargetOperator]?.[platform] ?? []).includes(k8sVersion)
-    : true; // no data → suppress warning
+  const newestSourceSupportsK8s = operatorSupportsK8sVersion(newestSourceOperator, platform, k8sVersion);
+  const newestTargetSupportsK8s = operatorSupportsK8sVersion(newestTargetOperator, platform, k8sVersion);
 
   let k8sUpgradeWarningHtml = '';
   if (isRelevantPlatform && k8sVersion) {
@@ -1345,7 +1263,11 @@ function buildK8sDatabaseUpgradeStep(selections, dbContext = {}) {
   const currentDbFamily = dbContext.currentDbFamily
     ?? getDatabaseVersionFamily(selections.databaseVersion);
   const currentDbLabel = getDatabaseVersionFamilyLabel(currentDbFamily);
-  const dbReq = getDatabaseUpgradeRequirement(currentDbFamily, selections.targetVersion);
+  // Never recommend past the database family the user selected as their target.
+  const userTargetDbFamily = selections.targetDatabaseVersion
+    ? getDatabaseVersionFamily(selections.targetDatabaseVersion)
+    : '';
+  const dbReq = getDatabaseUpgradeRequirement(currentDbFamily, selections.targetVersion, userTargetDbFamily);
   const status = dbContext.status ?? dbReq.status;
   const isPreCluster = dbContext.isPreCluster ?? false;
   const recommendedDbFamily =
@@ -1359,9 +1281,6 @@ function buildK8sDatabaseUpgradeStep(selections, dbContext = {}) {
 
   // CE breaking changes for this hop's DB jump, capped at the target database
   // version the user selected so the wizard never reports beyond their intent.
-  const userTargetDbFamily = selections.targetDatabaseVersion
-    ? getDatabaseVersionFamily(selections.targetDatabaseVersion)
-    : '';
   const breakingToFamily = userTargetDbFamily
     ? clampDatabaseFamily(recommendedDbFamily, userTargetDbFamily)
     : recommendedDbFamily;
@@ -1397,58 +1316,105 @@ function buildK8sDatabaseUpgradeStep(selections, dbContext = {}) {
             required.</p>`;
 
   if (selections.activeActive) {
+    // Active-Active database version upgrades are NOT driven by the REAADB
+    // custom resource. spec.globalConfigurations.redisVersion exists only
+    // because globalConfigurations embeds the REDB schema, and Redis documents
+    // it as unsupported for Active-Active. A CRDB version change is a
+    // coordinated cross-cluster operation performed with `rladmin upgrade db`
+    // on every participating cluster — so this step mirrors the VM/rladmin
+    // Active-Active procedure, run via `kubectl exec` into a Redis Enterprise
+    // pod on each cluster rather than by patching the REAADB.
+    const aaFamilyIntroHtml = status === 'required'
+      ? `<p class="status-copy">Current database family <strong>${escapeHtml(currentDbLabel)}</strong>
+          is not bundled with <strong>${escapeHtml(targetLabel)}</strong>, so an Active-Active
+          database upgrade to family <strong>${escapeHtml(recommendedDbLabel)}</strong> is
+          <strong>required</strong>.</p>`
+      : status === 'recommended'
+        ? `<p class="status-copy"><strong>Recommended:</strong> now that every participating cluster
+            runs <strong>${escapeHtml(targetLabel)}</strong>, move the Active-Active database to family
+            <strong>${escapeHtml(recommendedDbLabel)}</strong>. The existing family
+            <strong>${escapeHtml(currentDbLabel)}</strong> keeps working, but Redis recommends moving to
+            the latest bundled family.</p>`
+        : `<p class="status-copy">Current database family <strong>${escapeHtml(currentDbLabel)}</strong>
+            already matches the latest bundled family for <strong>${escapeHtml(targetLabel)}</strong>.
+            No Active-Active database version change is required.</p>`;
+
     return {
       title: 'Upgrade Active-Active databases (Kubernetes)',
       html: `
-        ${dbStatusIntroHtml}
-        <p class="status-copy">This deployment uses Active-Active (CRDB) databases on Kubernetes.
-          After the operator and cluster are upgraded, update each Active-Active database's custom
-          resource.</p>
+        ${aaFamilyIntroHtml}
+        <section class="warning-panel" style="margin-bottom:1rem;">
+          <p class="status-copy">
+            <strong>Do not change the database version through the REAADB custom resource.</strong>
+            An Active-Active database is a global definition shared across all participating clusters,
+            and the operator does not propagate a version change from a REAADB edit.
+            <code>spec.globalConfigurations.redisVersion</code> exists only because
+            <code>globalConfigurations</code> embeds the REDB schema, and Redis documents it as
+            <strong>not supported for Active-Active databases</strong>. Upgrade the database version by
+            running <code>rladmin upgrade db</code> on <strong>every participating cluster</strong> —
+            via <code>kubectl exec</code> into a Redis Enterprise pod on each cluster — exactly as on a
+            non-Kubernetes deployment.
+          </p>
+        </section>
         <ol class="wizard-step-list">
           <li>
-            <strong>Ensure all participating clusters are upgraded</strong> — Before upgrading any
-            Active-Active database, verify that the Redis Enterprise operator and cluster (REC) have
-            been upgraded to <strong>${escapeHtml(targetLabel)}</strong> on all participating Kubernetes
-            clusters.
+            <strong>Ensure all participating clusters are upgraded</strong> — Verify the Redis Enterprise
+            operator and cluster (REC) have reached <strong>${escapeHtml(targetLabel)}</strong> and show
+            <code>Running</code> on <strong>every</strong> participating Kubernetes cluster before
+            touching any Active-Active database.
           </li>
           <li>
-            <strong>Update the RedisEnterpriseActiveActiveDatabase (REAADB) resource</strong> — Edit
-            each REAADB custom resource to set <code>spec.redisVersion</code> to the recommended
-            family <strong>${escapeHtml(recommendedDbLabel || 'latest bundled')}</strong>:
-            <pre><code>kubectl patch reaadb &lt;reaadb-name&gt; -n &lt;namespace&gt; --type merge -p \\
-  '{"spec":{"redisVersion":"${escapeHtml(redisVersionLiteral)}"}}'</code></pre>
-            The operator will coordinate the upgrade across all participating clusters.
+            <strong>Check Active-Active database status on each participating cluster</strong> — Find a
+            Redis Enterprise pod and open an <code>rladmin</code> shell. Repeat on every participating
+            cluster:
+            <pre><code>kubectl get pods -n &lt;namespace&gt; -l app=redis-enterprise
+kubectl exec -it &lt;rec-pod-name&gt; -n &lt;namespace&gt; -- rladmin status</code></pre>
+            In the status output, look for <strong>OLD REDIS VERSION</strong>,
+            <strong>OLD CRDB PROTOCOL VERSION</strong>, and <strong>OLD CRDB FEATURESET VERSION</strong>
+            indicators on the Active-Active database instances.
           </li>
-          ${hasModules ? `
           <li>
-            <strong>Update module versions</strong> — If your Active-Active databases use modules,
-            update the module specifications in the REAADB custom resource to versions compatible with
-            <strong>${escapeHtml(targetLabel)}</strong>.
-            ${moduleVersionListHtml ? `
-            <p style="margin-top:0.5rem;"><strong>Compatible module versions for
+            <strong>Upgrade each Active-Active database instance</strong> — On <strong>every</strong>
+            participating cluster, upgrade the database (and its bundled modules) with:
+            <pre><code>kubectl exec -it &lt;rec-pod-name&gt; -n &lt;namespace&gt; -- rladmin upgrade db { db:&lt;ID&gt; | &lt;database-name&gt; }</code></pre>
+            If the CRDB protocol version is outdated, a warning appears — read it carefully and confirm
+            the CRDB protocol update. The bundled module versions for
+            <strong>${escapeHtml(targetLabel)}</strong> are applied automatically by this command; leave
+            the REAADB <code>spec.globalConfigurations.modulesList</code> unchanged.
+            ${hasModules && moduleVersionListHtml ? `
+            <p style="margin-top:0.5rem;"><strong>Bundled module versions for
             ${escapeHtml(targetLabel)}:</strong></p>
             ${moduleVersionListHtml}
             ` : ''}
           </li>
-          ` : ''}
           <li>
-            <strong>Verify replication health</strong> — After the upgrade, confirm that the REAADB
-            status shows all instances as synchronized across all participating clusters:
+            <strong>Upgrade the CRDB feature set version if outdated</strong> — If
+            <code>rladmin status</code> showed <strong>OLD CRDB FEATURESET VERSION</strong>, after all
+            instances are upgraded and the CRDB protocol is current, find the CRDB GUID and update the
+            feature set:
+            <pre><code>kubectl exec -it &lt;rec-pod-name&gt; -n &lt;namespace&gt; -- crdb-cli crdb list</code></pre>
+            Match the cluster FQDN to its GUID, then update the feature set for each Active-Active
+            database as described in the reference documentation.
+          </li>
+          <li>
+            <strong>Verify replication health</strong> — Confirm the CRDB shows all instances
+            synchronized across all participating clusters with no replication lag. You can also check
+            the resource status:
             <pre><code>kubectl get reaadb -n &lt;namespace&gt;</code></pre>
           </li>
           <li>
-            <strong>Test application connectivity</strong> — Test read and write operations against
-            each participating cluster to confirm data consistency and application functionality.
+            <strong>Test application connectivity</strong> — Test read and write operations against each
+            participating cluster to confirm data consistency and application functionality.
           </li>
         </ol>
         ${breakingChangesHtml}
         <section class="wizard-step-ref">
           <h4>Reference</h4>
-          <a href="${escapeHtml(K8S_UPGRADE_DOC_URL)}" target="_blank" rel="noreferrer">
-            Upgrade Redis Enterprise for Kubernetes — Redis docs
-          </a>
           <a href="${escapeHtml(ACTIVE_ACTIVE_UPGRADE_DOC_URL)}" target="_blank" rel="noreferrer">
             Upgrade an Active-Active database — Redis docs
+          </a>
+          <a href="${escapeHtml(K8S_UPGRADE_DOC_URL)}" target="_blank" rel="noreferrer">
+            Upgrade Redis Enterprise for Kubernetes — Redis docs
           </a>
         </section>
       `,
@@ -1532,6 +1498,12 @@ function buildWizardSteps(selections, selectedPath) {
   const versionStops = selectedPath || [selections.sourceVersion, selections.targetVersion];
   const isMultiStep = versionStops.length > 2;
   const isK8s = isK8sPlatform(selections.platform);
+
+  // Cap DB recommendations at the family the user chose as their target so the
+  // wizard never recommends a newer database family than they intend to reach.
+  const userTargetDbFamily = selections.targetDatabaseVersion
+    ? getDatabaseVersionFamily(selections.targetDatabaseVersion)
+    : '';
 
   // Pre-upgrade checks apply to the overall upgrade journey
   const steps = [buildPreUpgradeStep(selections)];
@@ -1640,7 +1612,7 @@ function buildWizardSteps(selections, selectedPath) {
     // family, so the user has to upgrade the DB on the SOURCE cluster first.
     // Mirrors the summary's "Database upgrade required (to X)" line in results.js.
     if (useDbHopContext) {
-      const preDbReq = getDatabaseUpgradeRequirement(runningDbFamily, stepTarget);
+      const preDbReq = getDatabaseUpgradeRequirement(runningDbFamily, stepTarget, userTargetDbFamily);
       if (preDbReq.status === 'required') {
         const preClusterFamily =
           getPreClusterUpgradeDatabaseFamily(stepSource, stepTarget, runningDbFamily) || preDbReq.recommended;
@@ -1685,7 +1657,7 @@ function buildWizardSteps(selections, selectedPath) {
     //   target cluster (status === 'recommended'). The pre-cluster step above
     //   already covers the required case; status === 'none' means nothing to do.
     if (useDbHopContext) {
-      const postDbReq = getDatabaseUpgradeRequirement(runningDbFamily, stepTarget);
+      const postDbReq = getDatabaseUpgradeRequirement(runningDbFamily, stepTarget, userTargetDbFamily);
       if (postDbReq.status === 'recommended') {
         const postDbStep = isK8s
           ? buildK8sDatabaseUpgradeStep(stepSelections, {
@@ -1754,7 +1726,7 @@ function buildPrintDocumentHtml(selections, selectedPath, steps) {
 
     <section class="print-summary">
       <h2>Your environment</h2>
-      ${buildSummaryListHtml(selections)}
+      ${buildEnvironmentSummaryHtml(selections)}
       <p class="print-path"><strong>Upgrade path:</strong> ${pathHtml}</p>
     </section>
 

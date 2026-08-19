@@ -1,5 +1,6 @@
 import {
-  OPTIONS,
+  CLUSTER_FAMILY_ORDER,
+  buildEnvironmentSummaryHtml,
   escapeHtml,
   findUpgradePaths,
   getClusterVersionFamily,
@@ -19,6 +20,8 @@ import {
   getSupportedOperatingSystemOptions,
   isInDownloadCenter,
   isK8sPlatform,
+  labelForOperatingSystem,
+  labelForPlatform,
 } from './upgrade-data.js';
 
 const guideOutput = document.querySelector('#guide-output');
@@ -32,28 +35,10 @@ const migrationReferenceSection = document.querySelector('#migration-reference')
 const osUpgradeNote = document.querySelector('#os-upgrade-note');
 
 const STORAGE_KEY = 'pathfinder_selections';
-const VERSION_FAMILY_ORDER = ['6.0', '6.2', '6.4', '7.2', '7.4', '7.8', '7.22', '8.0'];
-
-function labelForPlatform(value) {
-  if (value === 'vms' || value === 'bare-metal') return 'VMs and Bare Metal';
-  if (value === 'kubernetes-community') return 'Kubernetes';
-  if (value === 'kubernetes-openshift') return 'OpenShift';
-  return OPTIONS.platforms.find((option) => option.value === value)?.label
-    ?? OPTIONS.k8sDistributions.find((option) => option.value === value)?.label
-    ?? value;
-}
-
-function labelForOperatingSystem(value) {
-  return OPTIONS.operatingSystems.find((option) => option.value === value)?.label ?? value;
-}
-
-function getModuleSelectionCopy(moduleValues) {
-  return moduleValues.length ? getModuleSelectionSummary(moduleValues) : 'No modules installed';
-}
 
 function isLargeVersionJump(sourceVersion, targetVersion) {
-  const sourceIndex = VERSION_FAMILY_ORDER.indexOf(getClusterVersionFamily(sourceVersion));
-  const targetIndex = VERSION_FAMILY_ORDER.indexOf(getClusterVersionFamily(targetVersion));
+  const sourceIndex = CLUSTER_FAMILY_ORDER.indexOf(getClusterVersionFamily(sourceVersion));
+  const targetIndex = CLUSTER_FAMILY_ORDER.indexOf(getClusterVersionFamily(targetVersion));
   return sourceIndex >= 0 && targetIndex >= 0 && targetIndex - sourceIndex >= 4;
 }
 
@@ -66,54 +51,7 @@ function renderList(items) {
 }
 
 function renderResultsSummary(selections) {
-  const selectedModules = Array.isArray(selections.modules) ? selections.modules : [];
-
-  resultsSummary.innerHTML = `
-    <dl class="results-summary-list">
-      <div>
-        <dt>Current version</dt>
-        <dd>${escapeHtml(getClusterVersionLabel(selections.sourceVersion))}</dd>
-      </div>
-      <div>
-        <dt>Target version</dt>
-        <dd>${escapeHtml(getClusterVersionLabel(selections.targetVersion))}</dd>
-      </div>
-      <div>
-        <dt>Current database version</dt>
-        <dd>${escapeHtml(getDatabaseVersionFamilyLabel(selections.databaseVersion))}</dd>
-      </div>
-      ${selections.targetDatabaseVersion ? `
-      <div>
-        <dt>Target database version</dt>
-        <dd>${escapeHtml(getDatabaseVersionFamilyLabel(selections.targetDatabaseVersion))}</dd>
-      </div>
-      ` : ''}
-      <div>
-        <dt>Deployment platform</dt>
-        <dd>${escapeHtml(labelForPlatform(selections.platform))}</dd>
-      </div>
-      ${isK8sPlatform(selections.platform) && selections.k8sVersion ? `
-      <div>
-        <dt>${selections.platform === 'kubernetes-openshift' ? 'OpenShift version' : 'Kubernetes version'}</dt>
-        <dd>${escapeHtml(selections.k8sVersion)}</dd>
-      </div>
-      ` : ''}
-      ${isK8sPlatform(selections.platform) ? '' : `
-      <div>
-        <dt>Operating system</dt>
-        <dd>${escapeHtml(labelForOperatingSystem(selections.operatingSystem))}</dd>
-      </div>
-      `}
-      <div>
-        <dt>Installed modules</dt>
-        <dd>${escapeHtml(getModuleSelectionCopy(selectedModules))}</dd>
-      </div>
-      <div>
-        <dt>Active-Active (CRDB)</dt>
-        <dd>${selections.activeActive ? 'Yes' : 'No'}</dd>
-      </div>
-    </dl>
-  `;
+  resultsSummary.innerHTML = buildEnvironmentSummaryHtml(selections);
 }
 
 function formatModuleSuffix(dbFamily, moduleNames, hasModules) {
@@ -134,6 +72,11 @@ function buildPathSummarySteps(selections, path, osUpgradeRequired, isK8s, modul
   const finalIdx = path.length - 1;
   const isMultiStep = path.length > 2;
   const steps = [];
+
+  // Cap DB recommendations at the family the user chose as their target.
+  const userTargetDbFamily = selections.targetDatabaseVersion
+    ? getDatabaseVersionFamily(selections.targetDatabaseVersion)
+    : '';
 
   // DB family threaded across this path's hops.
   let runningDbFamily = getDatabaseVersionFamily(selections.databaseVersion);
@@ -179,7 +122,7 @@ function buildPathSummarySteps(selections, path, osUpgradeRequired, isK8s, modul
     // satisfying both. Falls back to the target's latest if no intersection
     // exists (shouldn't happen with current data, but keeps the summary
     // populated rather than silently dropping the step).
-    const dbReq = getDatabaseUpgradeRequirement(runningDbFamily, stepTarget);
+    const dbReq = getDatabaseUpgradeRequirement(runningDbFamily, stepTarget, userTargetDbFamily);
     if (dbReq.status === 'required') {
       const preClusterFamily = getPreClusterUpgradeDatabaseFamily(stepSource, stepTarget, runningDbFamily)
         || dbReq.recommended;
@@ -207,7 +150,7 @@ function buildPathSummarySteps(selections, path, osUpgradeRequired, isK8s, modul
     // family. If a required pre-cluster step bumped the family to (say) 7.2
     // but the target cluster bundles 8.2, this surfaces the optional follow-up
     // upgrade the user can do once the cluster reaches the target.
-    const postDbReq = getDatabaseUpgradeRequirement(runningDbFamily, stepTarget);
+    const postDbReq = getDatabaseUpgradeRequirement(runningDbFamily, stepTarget, userTargetDbFamily);
     if (postDbReq.status === 'recommended') {
       const recommendedLabel = escapeHtml(getDatabaseVersionFamilyLabel(postDbReq.recommended));
       const moduleSuffix = formatModuleSuffix(postDbReq.recommended, moduleNames, hasModules);
@@ -232,10 +175,6 @@ function describePathOption(path) {
   return `via ${bridges.join(' → ')}`;
 }
 
-// Used to rank a path's bridge "freshness" relative to the other candidate
-// paths. Higher index = newer family. Versions outside the list rank at -1.
-const PATH_FAMILY_ORDER = ['6.0', '6.2', '6.4', '7.2', '7.4', '7.8', '7.22', '8.0'];
-
 // Extract decision-relevant facts about a single path. The numbers and flags
 // here are then compared across paths to produce comparative guidance — so each
 // fact should be something that can meaningfully differ between two candidate
@@ -248,22 +187,25 @@ function buildPathFacts(selections, path, osUpgradeRequired, isK8s) {
     osOnSourceCluster: false,       // OS upgrade must happen on the original cluster
     osPlacedOnVersion: null,
     anyBridgeNotInDownloadCenter: false,
-    bridgeRank: -1,                 // highest bridge family rank in PATH_FAMILY_ORDER
+    bridgeRank: -1,                 // highest bridge family rank in CLUSTER_FAMILY_ORDER
   };
 
+  const userTargetDbFamily = selections.targetDatabaseVersion
+    ? getDatabaseVersionFamily(selections.targetDatabaseVersion)
+    : '';
   let runningDb = getDatabaseVersionFamily(selections.databaseVersion);
   for (let i = 1; i < path.length; i++) {
     const isFinalHop = i === path.length - 1;
     const stepSource = path[i - 1];
     const stepTarget = path[i];
-    const dbReq = getDatabaseUpgradeRequirement(runningDb, stepTarget);
+    const dbReq = getDatabaseUpgradeRequirement(runningDb, stepTarget, userTargetDbFamily);
     if (dbReq.status === 'required') {
       facts.preClusterRequiredDbUpgrades++;
       if (!isFinalHop) facts.inTransitDbUpgrades++;
       runningDb =
         getPreClusterUpgradeDatabaseFamily(stepSource, stepTarget, runningDb) || dbReq.recommended;
     }
-    const postDbReq = getDatabaseUpgradeRequirement(runningDb, stepTarget);
+    const postDbReq = getDatabaseUpgradeRequirement(runningDb, stepTarget, userTargetDbFamily);
     if (postDbReq.status === 'recommended' && !isFinalHop) {
       facts.inTransitDbUpgrades++;
     }
@@ -277,7 +219,7 @@ function buildPathFacts(selections, path, osUpgradeRequired, isK8s) {
   }
 
   const bridgeRanks = facts.bridges
-    .map((b) => PATH_FAMILY_ORDER.indexOf(getClusterVersionFamily(b)))
+    .map((b) => CLUSTER_FAMILY_ORDER.indexOf(getClusterVersionFamily(b)))
     .filter((r) => r >= 0);
   facts.bridgeRank = bridgeRanks.length ? Math.max(...bridgeRanks) : -1;
 
@@ -780,6 +722,23 @@ function renderBreakingChangesSummary(selections) {
    Initialization
    --------------------------------------------------------------------------- */
 
+// Log the real error to the console (for debugging) and show the user a
+// generic, non-technical message. Never render stack traces into the page or
+// rebuild document.body — doing so leaks internals and tears down listeners.
+function reportFatal(context, error) {
+  console.error(`${context} failed`, error);
+  if (guideOutput) {
+    guideOutput.innerHTML = `
+      <article class="guide-panel unsupported-panel">
+        <h3>Something went wrong</h3>
+        <p class="status-copy">
+          The upgrade guide could not be generated. Please go back to the form and try again.
+        </p>
+      </article>
+    `;
+  }
+}
+
 function initialize() {
   const stored = sessionStorage.getItem(STORAGE_KEY);
 
@@ -800,7 +759,7 @@ function initialize() {
   try {
     renderResultsSummary(selections);
   } catch (e) {
-    document.body.innerHTML += `<pre style="color:red">renderResultsSummary error: ${e.message}\n${e.stack}</pre>`;
+    reportFatal('renderResultsSummary', e);
     return;
   }
 
@@ -808,14 +767,14 @@ function initialize() {
   try {
     result = renderUpgradePathResult(selections);
   } catch (e) {
-    document.body.innerHTML += `<pre style="color:red">renderUpgradePathResult error: ${e.message}\n${e.stack}</pre>`;
+    reportFatal('renderUpgradePathResult', e);
     return;
   }
 
   try {
     renderBreakingChangesSummary(selections);
   } catch (e) {
-    document.body.innerHTML += `<pre style="color:red">renderBreakingChangesSummary error: ${e.message}\n${e.stack}</pre>`;
+    reportFatal('renderBreakingChangesSummary', e);
     return;
   }
 

@@ -1,14 +1,3 @@
-export const DEFAULT_SELECTIONS = {
-  sourceVersion: '7.22',
-  targetVersion: '8.0.10',
-  databaseVersion: '7.4',
-  targetDatabaseVersion: '8.0',
-  modules: 'none',
-  operatingSystem: 'ubuntu-20.04',
-  platform: 'vms',
-  activeActive: false,
-};
-
 const CLUSTER_VERSION_LABELS = {
   '6.0': '6.0.x',
   '6.2.4': '6.2.4',
@@ -26,6 +15,7 @@ const CLUSTER_VERSION_LABELS = {
   '8.0.10': '8.0.10',
   '8.0.16': '8.0.16',
   '8.0.18': '8.0.18',
+  '8.0.20': '8.0.20',
 };
 
 const DOCUMENTED_SOURCE_VERSIONS = [
@@ -42,7 +32,7 @@ const DOCUMENTED_SOURCE_VERSIONS = [
   '7.22',
 ];
 
-const DOCUMENTED_TARGET_VERSIONS = ['6.4', '7.2', '7.4', '7.8', '7.22', '8.0.2', '8.0.6', '8.0.10', '8.0.16', '8.0.18'];
+const DOCUMENTED_TARGET_VERSIONS = ['6.4', '7.2', '7.4', '7.8', '7.22', '8.0.2', '8.0.6', '8.0.10', '8.0.16', '8.0.18', '8.0.20'];
 
 // This selector uses the bundled Redis DB version families from the Redis docs'
 // "Default Redis database versions" table, not the separate default upgraded/new
@@ -133,7 +123,11 @@ const OS_SUPPORT_BY_CLUSTER_VERSION = {
   '7.4': ['rhel-9', 'rhel-8', 'ubuntu-20.04', 'ubuntu-18.04', 'amazon-linux-2'],
   '7.8': ['rhel-9', 'rhel-9-fips', 'rhel-8', 'ubuntu-22.04', 'ubuntu-20.04', 'amazon-linux-2'],
   '7.22': ['rhel-9', 'rhel-9-fips', 'rhel-8', 'ubuntu-22.04', 'ubuntu-20.04', 'amazon-linux-2'],
-  '8.0': ['rhel-9', 'rhel-9-fips', 'rhel-8', 'ubuntu-22.04', 'ubuntu-20.04', 'amazon-linux-2'],
+  // Amazon Linux 2023 support was added in 8.0.20. The app models OS support at
+  // the 8.0 family level, so it is listed here for all 8.0.x rather than only
+  // 8.0.20+ — acceptable because sources top out at 7.22 (no ≤7.22 version
+  // supports AL2023), so this only affects target-OS suggestions for 8.0.
+  '8.0': ['rhel-9', 'rhel-9-fips', 'rhel-8', 'ubuntu-22.04', 'ubuntu-20.04', 'amazon-linux-2', 'amazon-linux-2023'],
 };
 
 const DATABASE_COMPATIBILITY_BY_CLUSTER_VERSION = {
@@ -203,28 +197,10 @@ const MODULES_BY_VALUE = MODULE_VERSION_DATA.reduce((accumulator, module) => {
   return accumulator;
 }, {});
 
-function buildModuleBundleSummary(featureSet) {
-  return (MODULE_BUNDLES_BY_FEATURE_SET[featureSet] ?? [])
-    .map((module) => `${getModuleEntryLabel(module)} ${module.version}`)
-    .join(', ');
-}
-
-function buildModuleOptions() {
-  const featureSetOptions = DOCUMENTED_DATABASE_VERSION_FAMILIES.filter(
-    (featureSet) => MODULE_BUNDLES_BY_FEATURE_SET[featureSet]?.length,
-  ).map((featureSet) => ({
-    value: featureSet,
-    label: `Feature set ${DATABASE_VERSION_FAMILY_LABELS[featureSet]} bundle — ${buildModuleBundleSummary(featureSet)}`,
-  }));
-
-  return [{ value: 'none', label: 'No modules installed' }, ...featureSetOptions];
-}
-
 export const OPTIONS = {
   sourceVersions: buildVersionOptions(DOCUMENTED_SOURCE_VERSIONS),
   targetVersions: buildVersionOptions(DOCUMENTED_TARGET_VERSIONS),
   databaseVersions: DOCUMENTED_DATABASE_VERSION_FAMILIES,
-  modules: buildModuleOptions(),
   operatingSystems: [
     { value: 'rhel-9', label: 'RHEL 9 & compatible distros' },
     { value: 'rhel-9-fips', label: 'RHEL 9 FIPS mode' },
@@ -234,6 +210,7 @@ export const OPTIONS = {
     { value: 'ubuntu-20.04', label: 'Ubuntu 20.04' },
     { value: 'ubuntu-18.04', label: 'Ubuntu 18.04' },
     { value: 'ubuntu-16.04', label: 'Ubuntu 16.04' },
+    { value: 'amazon-linux-2023', label: 'Amazon Linux 2023' },
     { value: 'amazon-linux-2', label: 'Amazon Linux 2' },
     { value: 'amazon-linux-1', label: 'Amazon Linux 1' },
   ],
@@ -262,34 +239,19 @@ const DIRECT_CLUSTER_UPGRADE_PATHS = {
   '6.2.12': ['6.4', '7.2', '7.4', '7.8'],
   '6.2.18': ['6.4', '7.2', '7.4', '7.8'],
   // 6.4 supports a direct upgrade to 8.0 only through 8.0.2/8.0.6/8.0.10. Reaching
-  // 8.0.16 or 8.0.18 requires an intermediate 7.x bridge version.
+  // 8.0.16, 8.0.18, or 8.0.20 requires an intermediate 7.x bridge version.
   '6.4': ['6.4', '7.2', '7.4', '7.8', '7.22', '8.0.2', '8.0.6', '8.0.10'],
-  '7.2': ['7.2', '7.4', '7.8', '7.22', '8.0.2', '8.0.6', '8.0.10', '8.0.16', '8.0.18'],
-  '7.4': ['7.4', '7.8', '7.22', '8.0.2', '8.0.6', '8.0.10', '8.0.16', '8.0.18'],
-  '7.8': ['7.8', '7.22', '8.0.2', '8.0.6', '8.0.10', '8.0.16', '8.0.18'],
-  '7.22': ['7.22', '8.0.2', '8.0.6', '8.0.10', '8.0.16', '8.0.18'],
+  '7.2': ['7.2', '7.4', '7.8', '7.22', '8.0.2', '8.0.6', '8.0.10', '8.0.16', '8.0.18', '8.0.20'],
+  '7.4': ['7.4', '7.8', '7.22', '8.0.2', '8.0.6', '8.0.10', '8.0.16', '8.0.18', '8.0.20'],
+  '7.8': ['7.8', '7.22', '8.0.2', '8.0.6', '8.0.10', '8.0.16', '8.0.18', '8.0.20'],
+  '7.22': ['7.22', '8.0.2', '8.0.6', '8.0.10', '8.0.16', '8.0.18', '8.0.20'],
 };
-
-export const UPGRADE_PATH_DOC_URL =
-  'https://redis.io/docs/latest/operate/rs/installing-upgrading/upgrading/upgrade-cluster/#supported-upgrade-paths';
-
-export const DATABASE_COMPATIBILITY_DOC_URL =
-  'https://redis.io/docs/latest/operate/rs/installing-upgrading/upgrading/upgrade-database/';
 
 export const OS_UPGRADE_DOC_URL =
   'https://redis.io/docs/latest/operate/rs/installing-upgrading/upgrading/upgrade-os/';
 
 export const ACTIVE_ACTIVE_UPGRADE_DOC_URL =
   'https://redis.io/docs/latest/operate/rs/installing-upgrading/upgrading/upgrade-active-active/';
-
-export const OS_UPGRADE_CONSIDERATIONS = [
-  'Confirm the Redis Software version used for the OS work supports both the current operating system and the operating system you plan to end on. If it does not, plan an intermediate Redis version first.',
-  'Redis documents operating system changes as a rolling upgrade. Upgrade or replace one node at a time so cluster services stay available while you validate each step.',
-  'Choose the extra-node method when temporary capacity is available, or the replace-node method when you need to reuse existing node capacity.',
-  'Before touching any node, run rlcheck and rladmin status extra all, confirm persistence, replication, or export-based recovery readiness, and capture current cluster health for rollback planning.',
-  'If the cluster uses DNS or custom installation directories, plan those updates in advance and reuse the same custom-directory layout on every replacement node.',
-  'If the final node removed from the cluster is the primary node, demote it before removal and verify node health again before continuing.',
-];
 
 export function getClusterVersionLabel(version) {
   return CLUSTER_VERSION_LABELS[version] ?? version;
@@ -318,6 +280,7 @@ export function isInDownloadCenter(clusterVersion) {
 }
 
 export function getDatabaseVersionFamily(version) {
+  if (!version) return version;
   if (version.startsWith('8.4.')) {
     return '8.4';
   }
@@ -352,18 +315,6 @@ export function getDatabaseVersionFamily(version) {
 export function getDatabaseVersionFamilyLabel(version) {
   const family = getDatabaseVersionFamily(version);
   return DATABASE_VERSION_FAMILY_LABELS[family] ?? family;
-}
-
-export function getModuleBundle(featureSet) {
-  return MODULE_BUNDLES_BY_FEATURE_SET[featureSet] ?? [];
-}
-
-export function getModuleBundleSummary(featureSet) {
-  return buildModuleBundleSummary(featureSet);
-}
-
-export function getModulesByName(name) {
-  return MODULES_BY_NAME[name] ?? [];
 }
 
 export function getModuleOptionsForFeatureSet(featureSet) {
@@ -587,8 +538,15 @@ export function getPreClusterUpgradeDatabaseFamily(sourceClusterVersion, targetC
 // `recommended`: the current DB family is still bundled but a newer family is available,
 //                so Redis recommends moving to it after the cluster upgrade.
 // `none`:        the current DB family equals the latest bundled — nothing to do.
-export function getDatabaseUpgradeRequirement(currentDatabaseFamily, targetClusterVersion) {
-  const recommended = getRecommendedTargetDatabaseFamily(targetClusterVersion);
+// `maxDatabaseFamily` caps the recommendation at the database family the user
+// actually chose as their target, so the plan never recommends (or generates
+// commands for) a newer family than the one they intend to land on. When omitted
+// the recommendation is the highest family bundled with the target cluster.
+export function getDatabaseUpgradeRequirement(currentDatabaseFamily, targetClusterVersion, maxDatabaseFamily = '') {
+  const bundledRecommended = getRecommendedTargetDatabaseFamily(targetClusterVersion);
+  const recommended = maxDatabaseFamily
+    ? clampDatabaseFamily(bundledRecommended, maxDatabaseFamily)
+    : bundledRecommended;
   const compatibility = getDatabaseCompatibility(targetClusterVersion, currentDatabaseFamily);
 
   if (!compatibility.supported) {
@@ -833,7 +791,7 @@ export function getSupportedK8sVersions(operatorVersionFamily, platform) {
 // Source: https://redis.io/docs/latest/operate/kubernetes/reference/supported_k8s_distributions/
 // Regenerate with: ./_parse_k8s_matrix.py
 export const SUPPORTED_OPERATOR_VERSIONS = [
-  '8.0.18-11', '8.0.10-21', '8.0.6-6', '8.0.2-2',
+  '8.0.20-21', '8.0.18-11', '8.0.10-21', '8.0.6-6', '8.0.2-2',
   '7.22.2-21', '7.22.0-15', '7.22.0-7',
   '7.8.6-1', '7.8.4-9', '7.8.4-8', '7.8.2-6',
   '7.4.6-2', '7.4.2-12', '7.4.2-2',
@@ -851,6 +809,12 @@ export const SUPPORTED_OPERATOR_VERSIONS = [
 // Regenerate with: ./_parse_k8s_matrix.py
 export const OPERATOR_K8S_COMPATIBILITY = {
   // 8.0.x family
+  // NOTE: 8.0.20-21 was added manually from the redesigned supported_k8s_distributions
+  // page, which no longer breaks out per-distribution K8s versions — it publishes one
+  // Kubernetes list plus OpenShift. So the five non-OpenShift distros share the same
+  // list here (docs-faithful). The remaining 8.0.x rows below are still the pre-redesign
+  // per-distro data and will be reconciled when the K8s parser is rewritten.
+  '8.0.20-21': { 'kubernetes-community': ['1.31','1.32','1.33','1.34','1.35'], 'kubernetes-openshift': ['4.18','4.19','4.20','4.21','4.22'], 'kubernetes-eks': ['1.31','1.32','1.33','1.34','1.35'], 'kubernetes-aks': ['1.31','1.32','1.33','1.34','1.35'], 'kubernetes-gke': ['1.31','1.32','1.33','1.34','1.35'], 'kubernetes-rancher': ['1.31','1.32','1.33','1.34','1.35'] },
   '8.0.18-11': { 'kubernetes-community': ['1.33','1.34','1.35'], 'kubernetes-openshift': ['4.18','4.19','4.20','4.21'], 'kubernetes-eks': ['1.33','1.34','1.35'], 'kubernetes-aks': ['1.33','1.34','1.35'], 'kubernetes-gke': ['1.33','1.34','1.35'], 'kubernetes-rancher': ['1.33','1.34','1.35'] },
   '8.0.10-21': { 'kubernetes-community': ['1.32','1.33','1.34','1.35'], 'kubernetes-openshift': ['4.17','4.18','4.19','4.20'], 'kubernetes-eks': ['1.32','1.33','1.34'], 'kubernetes-aks': ['1.32','1.33','1.34'], 'kubernetes-gke': ['1.32','1.33','1.34','1.35'], 'kubernetes-rancher': ['1.32','1.33','1.34'] },
   '8.0.6-6': { 'kubernetes-community': ['1.32','1.33','1.34'], 'kubernetes-openshift': ['4.17','4.18','4.19','4.20'], 'kubernetes-eks': ['1.32','1.33','1.34'], 'kubernetes-aks': ['1.32','1.33','1.34'], 'kubernetes-gke': ['1.32','1.33','1.34'], 'kubernetes-rancher': ['1.31','1.32','1.33','1.34'] },
@@ -931,4 +895,98 @@ export function getOperatorVersionsForK8s(sourceVersion, k8sVersion, platform) {
     const supported = OPERATOR_K8S_COMPATIBILITY[opVer]?.[platform] ?? [];
     return supported.includes(k8sVersion);
   });
+}
+
+// Cluster version families in ascending order. Used by results.js to rank
+// bridge "freshness" and to detect large version jumps. (Distinct from
+// DATABASE_FAMILY_ORDER, which orders database — not cluster — families.)
+export const CLUSTER_FAMILY_ORDER = ['6.0', '6.2', '6.4', '7.2', '7.4', '7.8', '7.22', '8.0'];
+
+// Newest operator patch release in the same major.minor family as the given
+// cluster version. SUPPORTED_OPERATOR_VERSIONS is ordered newest-first, so the
+// first family match is the newest. Returns undefined when the family has no
+// operator data.
+export function getNewestOperatorForClusterVersion(clusterVersion) {
+  const family = getClusterVersionFamily(clusterVersion);
+  return SUPPORTED_OPERATOR_VERSIONS.find((v) => v.startsWith(family + '.'));
+}
+
+// Whether a given operator release lists the given Kubernetes/OpenShift version
+// as compatible. Missing operator or k8s version → true (no data, suppress the
+// warning rather than raise a false alarm).
+export function operatorSupportsK8sVersion(operator, platform, k8sVersion) {
+  if (!operator || !k8sVersion) return true;
+  return (OPERATOR_K8S_COMPATIBILITY[operator]?.[platform] ?? []).includes(k8sVersion);
+}
+
+// Human-readable deployment-platform label, shared by the results and wizard
+// pages so both render platform names identically.
+export function labelForPlatform(value) {
+  if (value === 'vms' || value === 'bare-metal') return 'VMs and Bare Metal';
+  if (value === 'kubernetes-community') return 'Kubernetes';
+  if (value === 'kubernetes-openshift') return 'OpenShift';
+  return OPTIONS.platforms.find((option) => option.value === value)?.label
+    ?? OPTIONS.k8sDistributions.find((option) => option.value === value)?.label
+    ?? value;
+}
+
+export function labelForOperatingSystem(value) {
+  return OPTIONS.operatingSystems.find((option) => option.value === value)?.label ?? value;
+}
+
+export function getModuleSelectionCopy(moduleValues) {
+  return moduleValues.length ? getModuleSelectionSummary(moduleValues) : 'No modules installed';
+}
+
+// Shared environment-summary markup used by the results page's "Selected inputs"
+// card, the wizard's summary card, and the exported PDF so all three stay in sync.
+export function buildEnvironmentSummaryHtml(selections) {
+  const selectedModules = Array.isArray(selections.modules) ? selections.modules : [];
+
+  return `
+    <dl class="results-summary-list">
+      <div>
+        <dt>Current version</dt>
+        <dd>${escapeHtml(getClusterVersionLabel(selections.sourceVersion))}</dd>
+      </div>
+      <div>
+        <dt>Target version</dt>
+        <dd>${escapeHtml(getClusterVersionLabel(selections.targetVersion))}</dd>
+      </div>
+      <div>
+        <dt>Current database version</dt>
+        <dd>${escapeHtml(getDatabaseVersionFamilyLabel(selections.databaseVersion))}</dd>
+      </div>
+      ${selections.targetDatabaseVersion ? `
+      <div>
+        <dt>Target database version</dt>
+        <dd>${escapeHtml(getDatabaseVersionFamilyLabel(selections.targetDatabaseVersion))}</dd>
+      </div>
+      ` : ''}
+      <div>
+        <dt>Deployment platform</dt>
+        <dd>${escapeHtml(labelForPlatform(selections.platform))}</dd>
+      </div>
+      ${isK8sPlatform(selections.platform) && selections.k8sVersion ? `
+      <div>
+        <dt>${selections.platform === 'kubernetes-openshift' ? 'OpenShift version' : 'Kubernetes version'}</dt>
+        <dd>${escapeHtml(selections.k8sVersion)}</dd>
+      </div>
+      ` : ''}
+      ${isK8sPlatform(selections.platform) ? '' : `
+      <div>
+        <dt>Operating system</dt>
+        <dd>${escapeHtml(labelForOperatingSystem(selections.operatingSystem))}</dd>
+      </div>
+      `}
+      <div>
+        <dt>Installed modules</dt>
+        <dd>${escapeHtml(getModuleSelectionCopy(selectedModules))}</dd>
+      </div>
+      <div>
+        <dt>Active-Active (CRDB)</dt>
+        <dd>${selections.activeActive ? 'Yes' : 'No'}</dd>
+      </div>
+    </dl>
+  `;
 }
