@@ -1,6 +1,7 @@
 import {
   OPTIONS,
   escapeHtml,
+  getClusterVersionFamily,
   getDatabaseCompatibility,
   getDatabaseVersionFamily,
   getDatabaseVersionFamilyLabel,
@@ -304,8 +305,8 @@ function syncK8sVersionOptions() {
   }
 
   const platform = getEffectivePlatform();
-  // Normalize '6.2.4', '6.2.8', etc. → '6.2' for matrix lookup
-  const family = sourceVersion.startsWith('6.2.') ? '6.2' : sourceVersion;
+  // Normalize patch versions ('6.2.4' → '6.2', '8.0.10' → '8.0') for matrix lookup
+  const family = getClusterVersionFamily(sourceVersion);
   const availableVersions = getSupportedK8sVersions(family, platform);
 
   if (!availableVersions.length) {

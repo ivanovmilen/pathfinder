@@ -91,6 +91,14 @@ select {
   gap: 1.5rem;
 }
 
+/* Grid items default to min-width: auto, which lets wide content (long code
+   lines, tables) stretch a panel past the viewport instead of staying inside
+   it. Pin the floor to 0 so children constrain and scroll internally. */
+.view-stack > *,
+.results-view > * {
+  min-width: 0;
+}
+
 .hero {
   position: relative;
   margin-bottom: 1.5rem;
@@ -937,10 +945,16 @@ code {
   overflow-x: auto;
 }
 
+/* Wrap long commands instead of scrolling/clipping. `pre` on the code element
+   let its min-content width propagate up through the flex list and the #wizard
+   grid item (min-width: auto), stretching the panel past the viewport — and
+   body's overflow-x: hidden made the end of the command unreachable. pre-wrap
+   preserves intentional line breaks; overflow-wrap handles unbroken tokens. */
 .wizard-step-list pre code {
   font-size: 0.82rem;
   line-height: 1.5;
-  white-space: pre;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .wizard-step-ref {
@@ -1222,6 +1236,15 @@ code {
     background: #ffffff !important;
     color: #1a1a1a;
     font-size: 11pt;
+    /* Reset screen layout properties that break print pagination in some
+       engines. Firefox (and some Safari versions) clip content at page
+       boundaries when body has a non-visible overflow — the classic
+       "sentence partially cut off in the PDF, but only in some browsers".
+       100vh/position:relative also interfere with fragmentation. */
+    overflow: visible !important;
+    min-height: 0 !important;
+    height: auto !important;
+    position: static !important;
   }
 
   #print-document {
@@ -1299,23 +1322,41 @@ code {
     break-after: avoid;
   }
 
-  /* Keep atomic units from splitting across pages. */
+  /* Keep atomic units from splitting across pages. Deliberately NOT applied
+     to <li>: several steps (Active-Active especially) have list items taller
+     than a full page, and an unbreakable element that exceeds the page is
+     clipped by some engines (Firefox/Safari) instead of force-broken. Lists
+     break naturally; widows/orphans below keep the breaks clean. */
   #print-document pre,
-  #print-document li,
   #print-document .breaking-changes-entry,
-  #print-document .wizard-step-ref,
-  #print-document .wizard-step-breaking-changes {
+  #print-document .wizard-step-ref {
     break-inside: avoid;
+  }
+
+  /* Never slice a lone line of text at a page boundary. */
+  #print-document p,
+  #print-document li {
+    orphans: 2;
+    widows: 2;
   }
 
   #print-document pre {
     white-space: pre-wrap;
     word-break: break-word;
+    overflow: visible; /* paper can't scroll — neutralize the screen overflow-x: auto */
     background: #f5f5f5;
     border: 1px solid #dddddd;
     border-radius: 6px;
     padding: 6pt 8pt;
     font-size: 9pt;
+  }
+
+  /* The screen rule `.wizard-step-list pre code { white-space: pre; }` would
+     otherwise defeat the pre-wrap above on the inner <code>, clipping long
+     commands (e.g. rladmin cluster join … replace_node) at the page edge. */
+  #print-document pre code {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
   }
 
   #print-document code {

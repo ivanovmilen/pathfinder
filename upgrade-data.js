@@ -30,6 +30,15 @@ const DOCUMENTED_SOURCE_VERSIONS = [
   '7.4',
   '7.8',
   '7.22',
+  // 8.0.x patch releases are valid sources for later 8.0.x targets. The latest
+  // available patch (currently 8.0.20) is deliberately NOT listed — there is no
+  // documented target to upgrade it to. When a newer patch ships, add the
+  // previous latest here and give it a DIRECT_CLUSTER_UPGRADE_PATHS row.
+  '8.0.2',
+  '8.0.6',
+  '8.0.10',
+  '8.0.16',
+  '8.0.18',
 ];
 
 const DOCUMENTED_TARGET_VERSIONS = ['6.4', '7.2', '7.4', '7.8', '7.22', '8.0.2', '8.0.6', '8.0.10', '8.0.16', '8.0.18', '8.0.20'];
@@ -245,6 +254,14 @@ const DIRECT_CLUSTER_UPGRADE_PATHS = {
   '7.4': ['7.4', '7.8', '7.22', '8.0.2', '8.0.6', '8.0.10', '8.0.16', '8.0.18', '8.0.20'],
   '7.8': ['7.8', '7.22', '8.0.2', '8.0.6', '8.0.10', '8.0.16', '8.0.18', '8.0.20'],
   '7.22': ['7.22', '8.0.2', '8.0.6', '8.0.10', '8.0.16', '8.0.18', '8.0.20'],
+  // Docs list two 8.0.x source bands: 8.0.2/8.0.6/8.0.10 can reach both the
+  // 8.0.2–8.0.10 and 8.0.16–8.0.20 bands; 8.0.16/8.0.18/8.0.20 only the latter.
+  // Exact-patch sources list only later versions (same pattern as the 6.2.x rows).
+  '8.0.2': ['8.0.6', '8.0.10', '8.0.16', '8.0.18', '8.0.20'],
+  '8.0.6': ['8.0.10', '8.0.16', '8.0.18', '8.0.20'],
+  '8.0.10': ['8.0.16', '8.0.18', '8.0.20'],
+  '8.0.16': ['8.0.18', '8.0.20'],
+  '8.0.18': ['8.0.20'],
 };
 
 export const OS_UPGRADE_DOC_URL =
