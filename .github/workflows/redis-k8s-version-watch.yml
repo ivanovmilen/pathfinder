@@ -16,7 +16,7 @@ jobs:
       # Previous run's version list lives in the Actions cache — nothing is
       # committed to the repo.
       - name: Restore previous version list
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v5
         with:
           path: state
           key: redis-k8s-versions-${{ github.run_id }}
@@ -94,7 +94,7 @@ jobs:
             --body-file report.md
 
       - name: Save current version list
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v5
         with:
           path: state
           key: redis-k8s-versions-${{ github.run_id }}
