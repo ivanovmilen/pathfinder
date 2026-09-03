@@ -19,7 +19,9 @@ jobs:
         uses: actions/cache/restore@v5
         with:
           path: state
-          key: redis-k8s-versions-${{ github.run_id }}
+          # The exact key never matches (unique per run) — restore always falls
+          # through to the prefix, which picks the most recently created cache.
+          key: redis-k8s-versions-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
             redis-k8s-versions-
 
@@ -53,12 +55,14 @@ jobs:
             echo "First run — baseline saved, no notification."
             cp current.txt state/versions.txt
             echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "save=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           added=$(comm -13 <(sort state/versions.txt) <(sort current.txt))
           removed=$(comm -23 <(sort state/versions.txt) <(sort current.txt))
           if [ -z "$added" ] && [ -z "$removed" ]; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "save=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           {
@@ -75,6 +79,7 @@ jobs:
           } > report.md
           cp current.txt state/versions.txt
           echo "changed=true" >> "$GITHUB_OUTPUT"
+          echo "save=true" >> "$GITHUB_OUTPUT"
 
       - name: Ensure label exists
         if: steps.diff.outputs.changed == 'true'
@@ -93,8 +98,14 @@ jobs:
             --label "redis-k8s-versions" \
             --body-file report.md
 
+      # Save only when the baseline was created or the version list changed —
+      # unchanged daily runs keep restoring the newest existing cache (restores
+      # count as access, so the 7-day eviction clock keeps resetting). The
+      # run_attempt suffix keeps the key unique on re-runs of the same run,
+      # since cache entries are immutable and a duplicate key fails the save.
       - name: Save current version list
+        if: steps.diff.outputs.save == 'true'
         uses: actions/cache/save@v5
         with:
           path: state
-          key: redis-k8s-versions-${{ github.run_id }}
+          key: redis-k8s-versions-${{ github.run_id }}-${{ github.run_attempt }}
