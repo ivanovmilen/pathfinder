@@ -1,0 +1,100 @@
+name: Watch Redis K8s support matrix
+
+on:
+  schedule:
+    - cron: '0 7 * * *'      # daily 07:00 UTC
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      # Previous run's version list lives in the Actions cache — nothing is
+      # committed to the repo.
+      - name: Restore previous version list
+        uses: actions/cache/restore@v4
+        with:
+          path: state
+          key: redis-k8s-versions-${{ github.run_id }}
+          restore-keys: |
+            redis-k8s-versions-
+
+      - name: Fetch page and extract versions
+        run: |
+          mkdir -p state
+          curl -fsSL "https://redis.io/docs/latest/operate/kubernetes/reference/supported_k8s_distributions/index.html.md" -o page.md
+          python3 - <<'PY'
+          import re
+          md = open('page.md').read()
+          # Operator releases appear as e.g. 8.2.0-12 anywhere on the page.
+          operators = sorted(set(re.findall(r'\b\d+\.\d+\.\d+-\d+\b', md)))
+          # K8s / OpenShift versions from the "Latest release" section only —
+          # the currently-supported set for the newest operator.
+          m = re.search(r'### Latest release(.*?)###', md, re.DOTALL)
+          latest = m.group(1) if m else md
+          k8s = sorted(set(re.findall(r'\|\s*(?:\d+\.\d+|&mdash;)\s*\|\s*(\d+\.\d+)\s*\|', latest)))
+          osh = sorted(set(re.findall(r'\|\s*(\d+\.\d+)\s*\|\s*\d+\.\d+\s*\|', latest)))
+          lines = ([f'operator {v}'   for v in operators]
+                 + [f'kubernetes {v}' for v in k8s]
+                 + [f'openshift {v}'  for v in osh])
+          open('current.txt', 'w').write('\n'.join(lines) + '\n')
+          # A silently broken extraction must fail loudly, not report "no change".
+          assert operators and k8s, 'extraction produced no versions — page layout changed?'
+          PY
+
+      - name: Compare with previous run
+        id: diff
+        run: |
+          if [ ! -f state/versions.txt ]; then
+            echo "First run — baseline saved, no notification."
+            cp current.txt state/versions.txt
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          added=$(comm -13 <(sort state/versions.txt) <(sort current.txt))
+          removed=$(comm -23 <(sort state/versions.txt) <(sort current.txt))
+          if [ -z "$added" ] && [ -z "$removed" ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          {
+            echo "The [supported Kubernetes distributions page](https://redis.io/docs/latest/operate/kubernetes/reference/supported_k8s_distributions/) changed:"
+            echo
+            if [ -n "$added" ]; then
+              echo "### 🆕 Added"; echo '```'; echo "$added"; echo '```'
+            fi
+            if [ -n "$removed" ]; then
+              echo "### ❌ Removed (EOL or dropped from latest release)"; echo '```'; echo "$removed"; echo '```'
+            fi
+            echo
+            echo "**Pathfinder follow-up:** update \`SUPPORTED_OPERATOR_VERSIONS\`, \`OPERATOR_K8S_COMPATIBILITY\`, and \`K8S_SUPPORT_MATRIX\` in \`upgrade-data.js\` (and the source/target version lists if a new Redis Software release shipped)."
+          } > report.md
+          cp current.txt state/versions.txt
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Ensure label exists
+        if: steps.diff.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh label create redis-k8s-versions --repo "$GITHUB_REPOSITORY" --color 0e8a16 --description "Redis K8s support matrix changed" --force
+
+      - name: Open notification issue
+        if: steps.diff.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh issue create \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "New Redis K8s operator/platform versions — $(date -u +%Y-%m-%d)" \
+            --label "redis-k8s-versions" \
+            --body-file report.md
+
+      - name: Save current version list
+        uses: actions/cache/save@v4
+        with:
+          path: state
+          key: redis-k8s-versions-${{ github.run_id }}
