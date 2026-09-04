@@ -2,7 +2,7 @@ name: Watch Redis support pages (K8s + OS)
 
 on:
   schedule:
-    - cron: '50 8 * * *'     # daily 07:50 UTC — off-peak minute; GitHub delays/skips congested :00 crons
+    - cron: '36 7 * * *'     # daily 07:36 UTC — off-peak minute; GitHub delays/skips congested :00 crons
   workflow_dispatch: {}
 
 permissions:
