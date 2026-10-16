@@ -5,6 +5,7 @@ import {
   getDatabaseCompatibility,
   getDatabaseVersionFamily,
   getDatabaseVersionFamilyLabel,
+  getK8sProductName,
   getModuleOptionsForFeatureSet,
   getSupportedK8sVersions,
   getSupportedOperatingSystemOptions,
@@ -34,6 +35,7 @@ const formControls = {
 
 const k8sDistributionFieldWrapper = document.querySelector('#k8s-distribution-field');
 const k8sVersionFieldWrapper = document.querySelector('#k8s-version-field');
+const k8sVersionLabelElement = document.querySelector('label[for="k8s-version"]');
 
 const formOutput = document.querySelector('#form-output');
 const updateGuideButton = document.querySelector('#update-guide');
@@ -46,7 +48,6 @@ const PLACEHOLDER_LABELS = {
   databaseVersion: 'Select current database version',
   targetDatabaseVersion: 'Select target database version',
   k8sDistribution: 'Select Kubernetes distribution',
-  k8sVersion: 'Select Kubernetes version',
   operatingSystem: 'Select operating system',
   modules: 'Select installed modules',
 };
@@ -318,8 +319,13 @@ function syncK8sVersionOptions() {
   const currentK8sVersion = formControls.k8sVersion.value;
   const selectedVersion = availableVersions.includes(currentK8sVersion) ? currentK8sVersion : '';
 
+  // OpenShift offers its own 4.x versions, so name the field after the platform
+  // the user picked instead of calling everything a "Kubernetes version".
+  const versionLabel = `${getK8sProductName(platform)} version`;
+  if (k8sVersionLabelElement) k8sVersionLabelElement.textContent = versionLabel;
+
   if (k8sVersionFieldWrapper) k8sVersionFieldWrapper.hidden = false;
-  populateSelect(formControls.k8sVersion, availableVersions, selectedVersion, PLACEHOLDER_LABELS.k8sVersion);
+  populateSelect(formControls.k8sVersion, availableVersions, selectedVersion, `Select ${versionLabel}`);
 }
 
 function syncModuleOptions() {

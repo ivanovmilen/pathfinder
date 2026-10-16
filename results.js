@@ -16,8 +16,8 @@ import {
   getModuleSelectionSummary,
   getModulesForDatabaseFamily,
   getPlatformSupport,
+  getOsUpgradeTargetOptions,
   getPreClusterUpgradeDatabaseFamily,
-  getSupportedOperatingSystemOptions,
   isInDownloadCenter,
   isK8sPlatform,
   labelForOperatingSystem,
@@ -109,8 +109,12 @@ function buildPathSummarySteps(selections, path, osUpgradeRequired, isK8s, modul
 
     // OS upgrade — placed BEFORE the hop that loses support for the current OS.
     if (osUpgradeBeforeHopIdx === i) {
-      const supportedTargetOs = getSupportedOperatingSystemOptions(selections.targetVersion, selections.platform);
-      const targetOsLabel = supportedTargetOs[0]?.label ?? 'a supported version';
+      // The OS upgrade runs on path[i - 1], so the new OS must be supported by
+      // that version and every later stop — not only the final target.
+      const osTargets = getOsUpgradeTargetOptions(path.slice(i - 1), selections.platform, selections.operatingSystem);
+      const targetOsLabel = osTargets.length
+        ? osTargets.map((option) => option.label).join(' or ')
+        : 'a supported version';
       const onVersionLabel = escapeHtml(getClusterVersionLabel(osUpgradeOnVersion));
       steps.push(`Upgrade OS to <strong>${escapeHtml(targetOsLabel)}</strong> (on <strong>${onVersionLabel}</strong>)`);
     }

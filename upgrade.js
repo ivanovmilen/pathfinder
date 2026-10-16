@@ -14,11 +14,12 @@ import {
   getDatabaseVersionFamilyLabel,
   getClusterVersionLabel,
   getModuleEntries,
+  getK8sProductName,
   getModuleLabel,
+  getOsUpgradeTargetOptions,
   getPlatformSupport,
   getPreClusterUpgradeDatabaseFamily,
   getRecommendedTargetDatabaseFamily,
-  getSupportedOperatingSystemOptions,
   isInDownloadCenter,
   isK8sPlatform,
   labelForOperatingSystem,
@@ -117,10 +118,6 @@ function buildDatabaseBreakingChangesHtml(fromFamily, toFamily) {
   `;
 }
 
-function getSupportedOperatingSystemLabels(clusterVersion, platform) {
-  return getSupportedOperatingSystemOptions(clusterVersion, platform).map((option) => option.label);
-}
-
 /**
  * Extract unique module names from the user's selected module values.
  * Returns an empty array when no modules are selected.
@@ -197,7 +194,7 @@ function buildPreUpgradeStep(selections) {
   // version is not in the newest patch's compatibility list for that family.
   let k8sVersionWarningHtml = '';
   if (isK8sPlatform(selections.platform) && selections.k8sVersion) {
-    const k8sVersionLabel = selections.platform === 'kubernetes-openshift' ? 'OpenShift version' : 'Kubernetes version';
+    const k8sVersionLabel = `${getK8sProductName(selections.platform)} version`;
 
     // --- Source-family check ---
     const newestSourceOperator = getNewestOperatorForClusterVersion(selections.sourceVersion);
@@ -488,15 +485,25 @@ function buildOsUpgradeStep(selections, osContext = {}) {
   const operatingSystemLabel = labelForOperatingSystem(selections.operatingSystem);
   const platformLabel = labelForPlatform(selections.platform);
   const finalTargetLabel = getClusterVersionLabel(selections.targetVersion);
-  const supportedTargetOsList = getSupportedOperatingSystemLabels(
-    selections.targetVersion,
+  // The OS upgrade happens while the cluster is on onClusterVersion, then the
+  // cluster continues through the remaining stops. The new OS must be supported
+  // by all of them, so offer only that intersection — not the final target's
+  // full list (e.g. 7.2 → 7.22 from RHEL 7 allows RHEL 8 only; 7.2 has no RHEL 9).
+  const osPathVersions = osContext.clusterVersions ?? [onClusterVersion, selections.targetVersion];
+  const osTargetLabels = getOsUpgradeTargetOptions(
+    osPathVersions,
     selections.platform,
-  );
+    selections.operatingSystem,
+  ).map((option) => option.label);
   const moduleNames = getSelectedModuleNames(selections);
   const hasModules = moduleNames.length > 0;
-  const targetOsCopy = supportedTargetOsList.length
-    ? `Documented supported operating systems for <strong>${escapeHtml(finalTargetLabel)}</strong>
-       on <strong>${escapeHtml(platformLabel)}</strong>: <strong>${escapeHtml(supportedTargetOsList.join(', '))}</strong>.`
+  const laterVersionsCopy = osPathVersions.length > 2
+    ? `every later version on your upgrade path through <strong>${escapeHtml(finalTargetLabel)}</strong>`
+    : `the target <strong>${escapeHtml(finalTargetLabel)}</strong>`;
+  const targetOsCopy = osTargetLabels.length
+    ? `Upgrade the operating system to <strong>${escapeHtml(osTargetLabels.join(' or '))}</strong>,
+       the ${osTargetLabels.length > 1 ? 'options' : 'option'} supported on <strong>${escapeHtml(platformLabel)}</strong>
+       by both <strong>${escapeHtml(onClusterLabel)}</strong> (where you perform this OS upgrade) and ${laterVersionsCopy}.`
     : `Review Redis's supported-platforms documentation for the target OS options.`;
 
   // Module binaries are OS-specific. During the rolling OS upgrade the cluster
@@ -1073,12 +1080,14 @@ function buildK8sClusterUpgradeHtml(sourceLabel, targetLabel, method, platform, 
   const newestSourceSupportsK8s = operatorSupportsK8sVersion(newestSourceOperator, platform, k8sVersion);
   const newestTargetSupportsK8s = operatorSupportsK8sVersion(newestTargetOperator, platform, k8sVersion);
 
+  const k8sProduct = getK8sProductName(platform);
+
   let k8sUpgradeWarningHtml = '';
   if (isRelevantPlatform && k8sVersion) {
     if (newestSourceOperator && !newestSourceSupportsK8s) {
       k8sUpgradeWarningHtml += `<section class="warning-panel">
         <p class="status-copy">
-          Kubernetes version <strong>${escapeHtml(k8sVersion)}</strong> is not supported by the
+          ${k8sProduct} version <strong>${escapeHtml(k8sVersion)}</strong> is not supported by the
           latest <strong>${escapeHtml(sourceLabel)}</strong> operator
           (<code>${escapeHtml(newestSourceOperator)}</code>). Your current Kubernetes cluster may
           already be incompatible with the newest patch of your installed operator family. Review the
@@ -1091,21 +1100,21 @@ function buildK8sClusterUpgradeHtml(sourceLabel, targetLabel, method, platform, 
     if (newestTargetOperator && !newestTargetSupportsK8s) {
       k8sUpgradeWarningHtml += `<section class="warning-panel">
         <p class="status-copy">
-          Kubernetes version <strong>${escapeHtml(k8sVersion)}</strong> is not supported by the
+          ${k8sProduct} version <strong>${escapeHtml(k8sVersion)}</strong> is not supported by the
           latest <strong>${escapeHtml(targetLabel)}</strong> operator
           (<code>${escapeHtml(newestTargetOperator)}</code>). A Kubernetes cluster upgrade may be
           required before or alongside the Redis Enterprise operator upgrade.
           Check the
           <a href="https://redis.io/docs/latest/operate/kubernetes/reference/supported_k8s_distributions/"
             target="_blank" rel="noreferrer">supported Kubernetes distributions</a> table to confirm
-          which Kubernetes versions are compatible with the target operator.
+          which ${k8sProduct} versions are compatible with the target operator.
         </p>
       </section>`;
     }
   }
 
   const operatorVersionRemarkHtml = filteredOperatorVersions.length
-    ? `<p class="status-copy">The operator version must be one of the supported versions compatible with your Kubernetes version: <code>${escapeHtml(k8sVersion)}</code>:
+    ? `<p class="status-copy">The operator version must be one of the supported versions compatible with your ${k8sProduct} version: <code>${escapeHtml(k8sVersion)}</code>:
         ${filteredOperatorVersions.map((v) => `<code>${escapeHtml(v)}</code>`).join(', ')}.
         See the <a href="https://redis.io/docs/latest/operate/kubernetes/reference/supported_k8s_distributions/" target="_blank" rel="noreferrer">supported Kubernetes distributions</a> reference page.
       </p>`
@@ -1601,6 +1610,8 @@ function buildWizardSteps(selections, selectedPath) {
     if (osUpgradeInsertBeforeHop === i) {
       const osStep = buildOsUpgradeStep(selections, {
         onClusterVersion: osUpgradeOnClusterVersion,
+        // The new OS must be supported by this version and every later stop.
+        clusterVersions: versionStops.slice(osUpgradeInsertBeforeHop),
       });
       osStep.title = isMultiStep
         ? `Upgrade the operating system (on ${getClusterVersionLabel(osUpgradeOnClusterVersion)})`

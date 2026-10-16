@@ -132,8 +132,8 @@ const OS_SUPPORT_BY_CLUSTER_VERSION = {
   '6.0': ['rhel-8', 'rhel-7', 'ubuntu-18.04', 'ubuntu-16.04', 'amazon-linux-1'],
   '6.2': ['rhel-8', 'rhel-7', 'ubuntu-18.04', 'ubuntu-16.04', 'amazon-linux-1'],
   '6.4': ['rhel-8', 'rhel-7', 'ubuntu-20.04', 'ubuntu-18.04', 'ubuntu-16.04', 'amazon-linux-2', 'amazon-linux-1'],
-  '7.2': ['rhel-8', 'rhel-7', 'ubuntu-20.04', 'ubuntu-18.04', 'ubuntu-16.04', 'amazon-linux-2', 'amazon-linux-1'],
-  '7.4': ['rhel-9', 'rhel-8', 'ubuntu-20.04', 'ubuntu-18.04', 'amazon-linux-2'],
+  '7.2': ['rhel-8', 'rhel-7', 'ubuntu-20.04', 'ubuntu-18.04', 'amazon-linux-2', 'amazon-linux-1'],
+  '7.4': ['rhel-9', 'rhel-8', 'ubuntu-20.04', 'amazon-linux-2'],
   '7.8': ['rhel-9', 'rhel-9-fips', 'rhel-8', 'ubuntu-22.04', 'ubuntu-20.04', 'amazon-linux-2'],
   '7.22': ['rhel-9', 'rhel-9-fips', 'rhel-8', 'ubuntu-22.04', 'ubuntu-20.04', 'amazon-linux-2'],
   // Amazon Linux 2023 support was added in 8.0.20. The app models OS support at
@@ -146,6 +146,14 @@ const OS_SUPPORT_BY_CLUSTER_VERSION = {
   '8.2': ['rhel-9', 'rhel-9-fips', 'rhel-8', 'ubuntu-22.04', 'ubuntu-20.04', 'amazon-linux-2023'],
 };
 
+// Redis database families bundled with each cluster version, in ascending order
+// (the last entry is the newest family, which is what the app recommends).
+// Source: the "Default Redis database versions" table at
+// https://redis.io/docs/latest/operate/rs/installing-upgrading/upgrading/upgrade-database/
+//
+// Looked up by exact cluster version first and then by version family — see
+// getBundledDatabaseFamilies(). Most releases share one entry per family, but
+// 8.0.x patches each bundle a different set, so those are keyed by exact patch.
 const DATABASE_COMPATIBILITY_BY_CLUSTER_VERSION = {
   // Redis's current database-upgrade table starts at 6.2.x. This app treats 6.0
   // as supporting only the 6.0 database family because 6.2 first appears in the
@@ -157,14 +165,27 @@ const DATABASE_COMPATIBILITY_BY_CLUSTER_VERSION = {
   '7.4': ['6.0', '6.2', '7.2'],
   '7.8': ['6.2', '7.2', '7.4'],
   '7.22': ['6.2', '7.2', '7.4'],
-  // Redis docs show that 8.0.x maintenance releases bundle at least 6.2/7.2/7.4/8.0/8.2.
-  // Later patches bundle more (8.4 from 8.0.10, 8.6 from 8.0.18), but this app models
-  // the broader 8.0.x family and deliberately under-claims — recommending a family the
-  // user's exact patch doesn't bundle would be worse.
+  // 8.0.x: the bundle grows patch by patch — 8.4 arrives in 8.0.10, 8.6 in 8.0.18.
+  '8.0.2': ['6.2', '7.2', '7.4', '8.0', '8.2'],
+  '8.0.6': ['6.2', '7.2', '7.4', '8.0', '8.2'],
+  '8.0.10': ['6.2', '7.2', '7.4', '8.0', '8.2', '8.4'],
+  '8.0.16': ['6.2', '7.2', '7.4', '8.0', '8.2', '8.4'],
+  '8.0.18': ['6.2', '7.2', '7.4', '8.0', '8.2', '8.4', '8.6'],
+  '8.0.20': ['6.2', '7.2', '7.4', '8.0', '8.2', '8.4', '8.6'],
+  // Fallback for an 8.0.x patch that is not listed above: the smallest 8.0.x bundle.
+  // It under-claims on purpose — recommending a family the user's exact patch may
+  // not bundle would be worse than recommending an older one.
   '8.0': ['6.2', '7.2', '7.4', '8.0', '8.2'],
-  // Per the docs' default-DB-versions table, 8.2.0 bundles 6.2–8.6 (default 8.6).
   '8.2': ['6.2', '7.2', '7.4', '8.0', '8.2', '8.4', '8.6'],
 };
+
+// Bundled database families for a cluster version: an exact-version entry wins
+// (8.0.x patches), otherwise the version's family entry. Empty when unknown.
+function getBundledDatabaseFamilies(clusterVersion) {
+  return DATABASE_COMPATIBILITY_BY_CLUSTER_VERSION[clusterVersion]
+    ?? DATABASE_COMPATIBILITY_BY_CLUSTER_VERSION[getClusterVersionFamily(clusterVersion)]
+    ?? [];
+}
 
 export function escapeHtml(value) {
   return String(value)
@@ -180,6 +201,13 @@ export function escapeHtml(value) {
 // `kubernetes-`, so the prefix check matches every user-reachable input.
 export function isK8sPlatform(value) {
   return typeof value === 'string' && value.startsWith('kubernetes-');
+}
+
+// What to call the version the user picked for their platform. OpenShift uses its
+// own 4.x numbering (4.19, 4.20…), so labelling it "Kubernetes version" misleads
+// people into entering the underlying Kubernetes version (1.32, 1.33…) instead.
+export function getK8sProductName(platform) {
+  return platform === 'kubernetes-openshift' ? 'OpenShift' : 'Kubernetes';
 }
 
 function buildVersionOptions(versions) {
@@ -387,7 +415,7 @@ export function getModuleSelectionSummary(moduleValues = []) {
  */
 export function getCompatibleModuleVersions(clusterVersion, moduleNames) {
   const versionFamily = getClusterVersionFamily(clusterVersion);
-  const compatibleFamilies = DATABASE_COMPATIBILITY_BY_CLUSTER_VERSION[versionFamily] ?? [];
+  const compatibleFamilies = getBundledDatabaseFamilies(clusterVersion);
 
   const results = [];
 
@@ -525,10 +553,39 @@ export function getSupportedOperatingSystemOptions(clusterVersion, platform = 'v
   );
 }
 
+function getOperatingSystemFamily(value) {
+  if (!value) return '';
+  if (value.startsWith('rhel')) return 'rhel';
+  if (value.startsWith('ubuntu')) return 'ubuntu';
+  if (value.startsWith('amazon-linux')) return 'amazon-linux';
+  return value;
+}
+
+// Operating systems a cluster can be moved to during an OS upgrade.
+//
+// The OS upgrade is a rolling replacement performed while the cluster is still
+// on the first version in `clusterVersions`, and the cluster then continues
+// through the remaining versions. So the new OS must be supported by EVERY one
+// of them — not just the final target. Example: a RHEL 7 cluster on 7.2 going to
+// 7.22 can only move to RHEL 8, because 7.2 does not support RHEL 9 even though
+// 7.22 does.
+//
+// Results stay within the current OS's family (RHEL → RHEL, Ubuntu → Ubuntu),
+// since this is an in-family version upgrade rather than a distro migration;
+// when the family has no compatible option, every compatible OS is returned.
+export function getOsUpgradeTargetOptions(clusterVersions, platform, currentOperatingSystem) {
+  const compatible = OPTIONS.operatingSystems.filter((option) =>
+    option.value !== currentOperatingSystem
+    && clusterVersions.every((version) => getPlatformSupport(version, platform, option.value).supported),
+  );
+  const family = getOperatingSystemFamily(currentOperatingSystem);
+  const sameFamily = compatible.filter((option) => getOperatingSystemFamily(option.value) === family);
+  return sameFamily.length ? sameFamily : compatible;
+}
+
 export function getDatabaseCompatibility(clusterVersion, databaseVersion) {
-  const versionFamily = getClusterVersionFamily(clusterVersion);
   const databaseFamily = getDatabaseVersionFamily(databaseVersion);
-  const supportedDatabaseFamilies = DATABASE_COMPATIBILITY_BY_CLUSTER_VERSION[versionFamily] ?? [];
+  const supportedDatabaseFamilies = getBundledDatabaseFamilies(clusterVersion);
 
   return {
     supported: supportedDatabaseFamilies.includes(databaseFamily),
@@ -543,8 +600,7 @@ export function getDatabaseCompatibility(clusterVersion, databaseVersion) {
 // arrays are stored in ascending order, so the last entry is the newest bundled
 // family. Returns an empty string when the cluster version isn't in the table.
 export function getRecommendedTargetDatabaseFamily(clusterVersion) {
-  const family = getClusterVersionFamily(clusterVersion);
-  const supported = DATABASE_COMPATIBILITY_BY_CLUSTER_VERSION[family] ?? [];
+  const supported = getBundledDatabaseFamilies(clusterVersion);
   return supported[supported.length - 1] ?? '';
 }
 
@@ -558,10 +614,8 @@ export function getRecommendedTargetDatabaseFamily(clusterVersion) {
 const DATABASE_FAMILY_ORDER = ['6.0', '6.2', '7.2', '7.4', '8.0', '8.2', '8.4', '8.6'];
 
 export function getPreClusterUpgradeDatabaseFamily(sourceClusterVersion, targetClusterVersion, currentDatabaseFamily) {
-  const sourceFamily = getClusterVersionFamily(sourceClusterVersion);
-  const targetFamily = getClusterVersionFamily(targetClusterVersion);
-  const sourceSupported = DATABASE_COMPATIBILITY_BY_CLUSTER_VERSION[sourceFamily] ?? [];
-  const targetSupported = new Set(DATABASE_COMPATIBILITY_BY_CLUSTER_VERSION[targetFamily] ?? []);
+  const sourceSupported = getBundledDatabaseFamilies(sourceClusterVersion);
+  const targetSupported = new Set(getBundledDatabaseFamilies(targetClusterVersion));
   const currentIdx = DATABASE_FAMILY_ORDER.indexOf(currentDatabaseFamily);
 
   const candidates = sourceSupported.filter((family) =>
@@ -738,12 +792,14 @@ export function getDatabaseBreakingChanges(sourceDatabaseVersion, targetDatabase
 // Maps operator version family → Kubernetes platform → list of supported K8s versions
 // (✅ Supported and ⚠️ Deprecated both treated as currently usable, ❌ End-of-life dropped).
 // Source: https://redis.io/docs/latest/operate/kubernetes/reference/supported_k8s_distributions/
-// Regenerate with: ./_parse_k8s_matrix.py
+//
+// The page publishes ONE Kubernetes list per operator release plus an OpenShift list (any
+// CNCF-conformant distribution running a supported Kubernetes version is supported). So
+// community/eks/aks/gke/rancher share the same list in each family — the union across that
+// family's operator releases — and openshift carries its own. TKGI/VKS/TKG are no longer
+// published, so they stay empty.
+// Regenerate with: ./_parse_k8s_matrix.py --write
 export const K8S_SUPPORT_MATRIX = {
-  // 8.2 row added manually from the redesigned supported_k8s_distributions page,
-  // which publishes a single Kubernetes list plus OpenShift (no per-distribution
-  // breakdown) — the Kubernetes list is replicated across the non-OpenShift
-  // distributions. Kubernetes 1.36 has no OpenShift pairing yet.
   '8.2': {
     'kubernetes-community': ['1.32', '1.33', '1.34', '1.35', '1.36'],
     'kubernetes-openshift': ['4.19', '4.20', '4.21', '4.22'],
@@ -757,78 +813,78 @@ export const K8S_SUPPORT_MATRIX = {
   },
   '8.0': {
     'kubernetes-community': ['1.31', '1.32', '1.33', '1.34', '1.35'],
-    'kubernetes-openshift': ['4.16', '4.17', '4.18', '4.19', '4.20', '4.21'],
+    'kubernetes-openshift': ['4.18', '4.19', '4.20', '4.21', '4.22'],
     'kubernetes-eks': ['1.31', '1.32', '1.33', '1.34', '1.35'],
     'kubernetes-aks': ['1.31', '1.32', '1.33', '1.34', '1.35'],
     'kubernetes-gke': ['1.31', '1.32', '1.33', '1.34', '1.35'],
-    'kubernetes-rancher': ['1.29', '1.30', '1.31', '1.32', '1.33', '1.34', '1.35'],
-    'kubernetes-tkgi': ['1.20', '1.21', '1.22', '1.23', '1.24'],
-    'kubernetes-vks': ['1.32', '1.33', '1.34', '1.35'],
+    'kubernetes-rancher': ['1.31', '1.32', '1.33', '1.34', '1.35'],
+    'kubernetes-tkgi': [],
+    'kubernetes-vks': [],
     'kubernetes-tkg': [],
   },
   '7.22': {
     'kubernetes-community': ['1.30', '1.31', '1.32', '1.33'],
-    'kubernetes-openshift': ['4.15', '4.16', '4.17', '4.18', '4.19'],
+    'kubernetes-openshift': ['4.17', '4.18', '4.19', '4.20'],
     'kubernetes-eks': ['1.30', '1.31', '1.32', '1.33'],
     'kubernetes-aks': ['1.30', '1.31', '1.32', '1.33'],
     'kubernetes-gke': ['1.30', '1.31', '1.32', '1.33'],
-    'kubernetes-rancher': ['1.28', '1.29', '1.30'],
-    'kubernetes-tkgi': ['1.17', '1.18', '1.19', '1.20', '1.21'],
+    'kubernetes-rancher': ['1.30', '1.31', '1.32', '1.33'],
+    'kubernetes-tkgi': [],
     'kubernetes-vks': [],
     'kubernetes-tkg': [],
   },
   '7.8': {
     'kubernetes-community': ['1.28', '1.29', '1.30', '1.31', '1.32'],
-    'kubernetes-openshift': ['4.12', '4.13', '4.14', '4.15', '4.16', '4.17', '4.18'],
-    'kubernetes-eks': ['1.27', '1.28', '1.29', '1.30', '1.31', '1.32'],
-    'kubernetes-aks': ['1.27', '1.28', '1.29', '1.30', '1.31', '1.32'],
+    'kubernetes-openshift': ['4.15', '4.16', '4.17', '4.18', '4.19'],
+    'kubernetes-eks': ['1.28', '1.29', '1.30', '1.31', '1.32'],
+    'kubernetes-aks': ['1.28', '1.29', '1.30', '1.31', '1.32'],
     'kubernetes-gke': ['1.28', '1.29', '1.30', '1.31', '1.32'],
-    'kubernetes-rancher': ['1.26', '1.27', '1.28', '1.29'],
-    'kubernetes-tkgi': ['1.17', '1.18', '1.19', '1.20'],
+    'kubernetes-rancher': ['1.28', '1.29', '1.30', '1.31', '1.32'],
+    'kubernetes-tkgi': [],
     'kubernetes-vks': [],
     'kubernetes-tkg': [],
   },
   '7.4': {
     'kubernetes-community': ['1.26', '1.27', '1.28', '1.29', '1.30'],
-    'kubernetes-openshift': ['4.11', '4.12', '4.13', '4.14', '4.15', '4.16'],
-    'kubernetes-eks': ['1.25', '1.26', '1.27', '1.28', '1.29'],
+    'kubernetes-openshift': ['4.13', '4.14', '4.15', '4.16', '4.17'],
+    'kubernetes-eks': ['1.26', '1.27', '1.28', '1.29', '1.30'],
     'kubernetes-aks': ['1.26', '1.27', '1.28', '1.29', '1.30'],
-    'kubernetes-gke': ['1.25', '1.26', '1.27', '1.28', '1.29', '1.30'],
-    'kubernetes-rancher': ['1.24', '1.25', '1.26', '1.27', '1.28'],
-    'kubernetes-tkgi': ['1.16', '1.17', '1.18', '1.19'],
+    'kubernetes-gke': ['1.26', '1.27', '1.28', '1.29', '1.30'],
+    'kubernetes-rancher': ['1.26', '1.27', '1.28', '1.29', '1.30'],
+    'kubernetes-tkgi': [],
     'kubernetes-vks': [],
     'kubernetes-tkg': [],
   },
   '7.2': {
     'kubernetes-community': ['1.24', '1.25', '1.26', '1.27', '1.28'],
-    'kubernetes-openshift': ['4.10', '4.11', '4.12', '4.13', '4.14'],
-    'kubernetes-eks': ['1.23', '1.24', '1.25', '1.26', '1.27'],
-    'kubernetes-aks': ['1.25', '1.26', '1.27'],
-    'kubernetes-gke': ['1.23', '1.24', '1.25', '1.26', '1.27'],
-    'kubernetes-rancher': ['1.23', '1.24', '1.25', '1.26'],
-    'kubernetes-tkgi': ['1.14', '1.15', '1.16', '1.17'],
+    'kubernetes-openshift': ['4.11', '4.12', '4.13', '4.14', '4.15'],
+    'kubernetes-eks': ['1.24', '1.25', '1.26', '1.27', '1.28'],
+    'kubernetes-aks': ['1.24', '1.25', '1.26', '1.27', '1.28'],
+    'kubernetes-gke': ['1.24', '1.25', '1.26', '1.27', '1.28'],
+    'kubernetes-rancher': ['1.24', '1.25', '1.26', '1.27', '1.28'],
+    'kubernetes-tkgi': [],
     'kubernetes-vks': [],
     'kubernetes-tkg': [],
   },
   '6.4': {
     'kubernetes-community': ['1.22', '1.23', '1.24', '1.25', '1.26', '1.27'],
-    'kubernetes-openshift': ['4.8', '4.9', '4.10', '4.11', '4.12'],
-    'kubernetes-eks': ['1.22', '1.23', '1.24', '1.25'],
-    'kubernetes-aks': ['1.23', '1.24', '1.25', '1.26'],
-    'kubernetes-gke': ['1.22', '1.23', '1.24', '1.25', '1.26'],
-    'kubernetes-rancher': ['1.21', '1.22', '1.23', '1.24'],
-    'kubernetes-tkgi': ['1.13', '1.14', '1.15'],
+    'kubernetes-openshift': ['4.9', '4.10', '4.11', '4.12', '4.13', '4.14'],
+    'kubernetes-eks': ['1.22', '1.23', '1.24', '1.25', '1.26', '1.27'],
+    'kubernetes-aks': ['1.22', '1.23', '1.24', '1.25', '1.26', '1.27'],
+    'kubernetes-gke': ['1.22', '1.23', '1.24', '1.25', '1.26', '1.27'],
+    'kubernetes-rancher': ['1.22', '1.23', '1.24', '1.25', '1.26', '1.27'],
+    'kubernetes-tkgi': [],
     'kubernetes-vks': [],
     'kubernetes-tkg': [],
   },
   '6.2': {
     'kubernetes-community': ['1.16', '1.17', '1.18', '1.19', '1.20', '1.21', '1.22', '1.23', '1.24', '1.25'],
-    'kubernetes-openshift': ['3.11', '4.5', '4.6', '4.7', '4.8', '4.9', '4.10', '4.11'],
-    'kubernetes-eks': ['1.18', '1.19', '1.20', '1.21', '1.22', '1.23'],
-    'kubernetes-aks': ['1.18', '1.19', '1.20', '1.21', '1.22', '1.23', '1.24'],
-    'kubernetes-gke': ['1.18', '1.19', '1.20', '1.21', '1.22', '1.23', '1.24', '1.25'],
-    'kubernetes-rancher': ['1.17', '1.18', '1.19', '1.20', '1.21', '1.22', '1.23', '1.24'],
-    'kubernetes-tkgi': ['1.07', '1.08', '1.10', '1.11', '1.12', '1.13', '1.14', '1.15'],
+    'kubernetes-openshift': ['4.3', '4.4', '4.5', '4.6', '4.7', '4.8', '4.9', '4.10', '4.11', '4.12'],
+    'kubernetes-eks': ['1.16', '1.17', '1.18', '1.19', '1.20', '1.21', '1.22', '1.23', '1.24', '1.25'],
+    'kubernetes-aks': ['1.16', '1.17', '1.18', '1.19', '1.20', '1.21', '1.22', '1.23', '1.24', '1.25'],
+    'kubernetes-gke': ['1.16', '1.17', '1.18', '1.19', '1.20', '1.21', '1.22', '1.23', '1.24', '1.25'],
+    'kubernetes-rancher': ['1.16', '1.17', '1.18', '1.19', '1.20', '1.21', '1.22', '1.23', '1.24', '1.25'],
+    'kubernetes-tkgi': [],
     'kubernetes-vks': [],
     'kubernetes-tkg': [],
   },
@@ -847,10 +903,10 @@ export function getSupportedK8sVersions(operatorVersionFamily, platform) {
 
 // Supported Redis Enterprise operator versions for the Kubernetes upgrade path.
 // Source: https://redis.io/docs/latest/operate/kubernetes/reference/supported_k8s_distributions/
-// Regenerate with: ./_parse_k8s_matrix.py
+// Regenerate with: ./_parse_k8s_matrix.py --write
 export const SUPPORTED_OPERATOR_VERSIONS = [
   '8.2.0-12',
-  '8.0.20-21', '8.0.18-11', '8.0.10-21', '8.0.6-6', '8.0.2-2',
+  '8.0.20-21', '8.0.18-11', '8.0.10-15', '8.0.6-6', '8.0.2-2',
   '7.22.2-21', '7.22.0-15', '7.22.0-7',
   '7.8.6-1', '7.8.4-9', '7.8.4-8', '7.8.2-6',
   '7.4.6-2', '7.4.2-12', '7.4.2-2',
@@ -865,63 +921,59 @@ export const SUPPORTED_OPERATOR_VERSIONS = [
 // aks/gke/rancher). TKGI/VKS data is captured in K8S_SUPPORT_MATRIX but not here, since the
 // app does not expose those distributions in the form.
 // Source: https://redis.io/docs/latest/operate/kubernetes/reference/supported_k8s_distributions/
-// Regenerate with: ./_parse_k8s_matrix.py
+//
+// The page publishes one Kubernetes list per operator release plus an OpenShift list, so the
+// five non-OpenShift distributions share the same list for each operator.
+// Regenerate with: ./_parse_k8s_matrix.py --write
 export const OPERATOR_K8S_COMPATIBILITY = {
-  // 8.2.x family — added manually from the redesigned docs page (single
-  // Kubernetes list + OpenShift; the K8s list is replicated across the
-  // non-OpenShift distributions). ✅ and ⚠️ both count as usable.
+  // 8.2.x family
   '8.2.0-12': { 'kubernetes-community': ['1.32','1.33','1.34','1.35','1.36'], 'kubernetes-openshift': ['4.19','4.20','4.21','4.22'], 'kubernetes-eks': ['1.32','1.33','1.34','1.35','1.36'], 'kubernetes-aks': ['1.32','1.33','1.34','1.35','1.36'], 'kubernetes-gke': ['1.32','1.33','1.34','1.35','1.36'], 'kubernetes-rancher': ['1.32','1.33','1.34','1.35','1.36'] },
 
   // 8.0.x family
-  // NOTE: 8.0.20-21 was added manually from the redesigned supported_k8s_distributions
-  // page, which no longer breaks out per-distribution K8s versions — it publishes one
-  // Kubernetes list plus OpenShift. So the five non-OpenShift distros share the same
-  // list here (docs-faithful). The remaining 8.0.x rows below are still the pre-redesign
-  // per-distro data and will be reconciled when the K8s parser is rewritten.
   '8.0.20-21': { 'kubernetes-community': ['1.31','1.32','1.33','1.34','1.35'], 'kubernetes-openshift': ['4.18','4.19','4.20','4.21','4.22'], 'kubernetes-eks': ['1.31','1.32','1.33','1.34','1.35'], 'kubernetes-aks': ['1.31','1.32','1.33','1.34','1.35'], 'kubernetes-gke': ['1.31','1.32','1.33','1.34','1.35'], 'kubernetes-rancher': ['1.31','1.32','1.33','1.34','1.35'] },
-  '8.0.18-11': { 'kubernetes-community': ['1.33','1.34','1.35'], 'kubernetes-openshift': ['4.18','4.19','4.20','4.21'], 'kubernetes-eks': ['1.33','1.34','1.35'], 'kubernetes-aks': ['1.33','1.34','1.35'], 'kubernetes-gke': ['1.33','1.34','1.35'], 'kubernetes-rancher': ['1.33','1.34','1.35'] },
-  '8.0.10-21': { 'kubernetes-community': ['1.32','1.33','1.34','1.35'], 'kubernetes-openshift': ['4.17','4.18','4.19','4.20'], 'kubernetes-eks': ['1.32','1.33','1.34'], 'kubernetes-aks': ['1.32','1.33','1.34'], 'kubernetes-gke': ['1.32','1.33','1.34','1.35'], 'kubernetes-rancher': ['1.32','1.33','1.34'] },
-  '8.0.6-6': { 'kubernetes-community': ['1.32','1.33','1.34'], 'kubernetes-openshift': ['4.17','4.18','4.19','4.20'], 'kubernetes-eks': ['1.32','1.33','1.34'], 'kubernetes-aks': ['1.32','1.33','1.34'], 'kubernetes-gke': ['1.32','1.33','1.34'], 'kubernetes-rancher': ['1.31','1.32','1.33','1.34'] },
-  '8.0.2-2': { 'kubernetes-community': ['1.31','1.32','1.33','1.34'], 'kubernetes-openshift': ['4.16','4.17','4.18','4.19','4.20'], 'kubernetes-eks': ['1.31','1.32','1.33','1.34'], 'kubernetes-aks': ['1.31','1.32','1.33','1.34'], 'kubernetes-gke': ['1.31','1.32','1.33','1.34'], 'kubernetes-rancher': ['1.29','1.30','1.31','1.32','1.33'] },
+  '8.0.18-11': { 'kubernetes-community': ['1.31','1.32','1.33','1.34','1.35'], 'kubernetes-openshift': ['4.18','4.19','4.20','4.21','4.22'], 'kubernetes-eks': ['1.31','1.32','1.33','1.34','1.35'], 'kubernetes-aks': ['1.31','1.32','1.33','1.34','1.35'], 'kubernetes-gke': ['1.31','1.32','1.33','1.34','1.35'], 'kubernetes-rancher': ['1.31','1.32','1.33','1.34','1.35'] },
+  '8.0.10-15': { 'kubernetes-community': ['1.31','1.32','1.33','1.34','1.35'], 'kubernetes-openshift': ['4.18','4.19','4.20','4.21','4.22'], 'kubernetes-eks': ['1.31','1.32','1.33','1.34','1.35'], 'kubernetes-aks': ['1.31','1.32','1.33','1.34','1.35'], 'kubernetes-gke': ['1.31','1.32','1.33','1.34','1.35'], 'kubernetes-rancher': ['1.31','1.32','1.33','1.34','1.35'] },
+  '8.0.6-6': { 'kubernetes-community': ['1.31','1.32','1.33','1.34'], 'kubernetes-openshift': ['4.18','4.19','4.20','4.21'], 'kubernetes-eks': ['1.31','1.32','1.33','1.34'], 'kubernetes-aks': ['1.31','1.32','1.33','1.34'], 'kubernetes-gke': ['1.31','1.32','1.33','1.34'], 'kubernetes-rancher': ['1.31','1.32','1.33','1.34'] },
+  '8.0.2-2': { 'kubernetes-community': ['1.31','1.32','1.33','1.34'], 'kubernetes-openshift': ['4.18','4.19','4.20','4.21'], 'kubernetes-eks': ['1.31','1.32','1.33','1.34'], 'kubernetes-aks': ['1.31','1.32','1.33','1.34'], 'kubernetes-gke': ['1.31','1.32','1.33','1.34'], 'kubernetes-rancher': ['1.31','1.32','1.33','1.34'] },
 
   // 7.22.x family
-  '7.22.2-21': { 'kubernetes-community': ['1.30','1.31','1.32','1.33'], 'kubernetes-openshift': ['4.15','4.16','4.17','4.18','4.19'], 'kubernetes-eks': ['1.30','1.31','1.32','1.33'], 'kubernetes-aks': ['1.30','1.31','1.32','1.33'], 'kubernetes-gke': ['1.30','1.31','1.32','1.33'], 'kubernetes-rancher': ['1.28','1.29','1.30'] },
-  '7.22.0-15': { 'kubernetes-community': ['1.30','1.31','1.32','1.33'], 'kubernetes-openshift': ['4.15','4.16','4.17','4.18','4.19'], 'kubernetes-eks': ['1.30','1.31','1.32','1.33'], 'kubernetes-aks': ['1.30','1.31','1.32','1.33'], 'kubernetes-gke': ['1.30','1.31','1.32','1.33'], 'kubernetes-rancher': ['1.28','1.29','1.30'] },
-  '7.22.0-7': { 'kubernetes-community': ['1.30','1.31','1.32'], 'kubernetes-openshift': ['4.15','4.16','4.17','4.18'], 'kubernetes-eks': ['1.30','1.31','1.32'], 'kubernetes-aks': ['1.30','1.31','1.32'], 'kubernetes-gke': ['1.30','1.31','1.32'], 'kubernetes-rancher': ['1.28','1.29','1.30'] },
+  '7.22.2-21': { 'kubernetes-community': ['1.30','1.31','1.32','1.33'], 'kubernetes-openshift': ['4.17','4.18','4.19','4.20'], 'kubernetes-eks': ['1.30','1.31','1.32','1.33'], 'kubernetes-aks': ['1.30','1.31','1.32','1.33'], 'kubernetes-gke': ['1.30','1.31','1.32','1.33'], 'kubernetes-rancher': ['1.30','1.31','1.32','1.33'] },
+  '7.22.0-15': { 'kubernetes-community': ['1.30','1.31','1.32','1.33'], 'kubernetes-openshift': ['4.17','4.18','4.19','4.20'], 'kubernetes-eks': ['1.30','1.31','1.32','1.33'], 'kubernetes-aks': ['1.30','1.31','1.32','1.33'], 'kubernetes-gke': ['1.30','1.31','1.32','1.33'], 'kubernetes-rancher': ['1.30','1.31','1.32','1.33'] },
+  '7.22.0-7': { 'kubernetes-community': ['1.30','1.31','1.32'], 'kubernetes-openshift': ['4.17','4.18','4.19'], 'kubernetes-eks': ['1.30','1.31','1.32'], 'kubernetes-aks': ['1.30','1.31','1.32'], 'kubernetes-gke': ['1.30','1.31','1.32'], 'kubernetes-rancher': ['1.30','1.31','1.32'] },
 
   // 7.8.x family
-  '7.8.6-1': { 'kubernetes-community': ['1.28','1.29','1.30','1.31','1.32'], 'kubernetes-openshift': ['4.13','4.14','4.15','4.16','4.17','4.18'], 'kubernetes-eks': ['1.28','1.29','1.30','1.31','1.32'], 'kubernetes-aks': ['1.29','1.30','1.31','1.32'], 'kubernetes-gke': ['1.29','1.30','1.31','1.32'], 'kubernetes-rancher': ['1.27','1.28','1.29'] },
-  '7.8.4-9': { 'kubernetes-community': ['1.28','1.29','1.30','1.31'], 'kubernetes-openshift': ['4.12','4.13','4.14','4.15','4.16','4.17','4.18'], 'kubernetes-eks': ['1.27','1.28','1.29','1.30'], 'kubernetes-aks': ['1.27','1.28','1.29','1.30'], 'kubernetes-gke': ['1.28','1.29','1.30'], 'kubernetes-rancher': ['1.26','1.27','1.28'] },
-  '7.8.4-8': { 'kubernetes-community': ['1.28','1.29','1.30','1.31'], 'kubernetes-openshift': ['4.12','4.13','4.14','4.15','4.16'], 'kubernetes-eks': ['1.27','1.28','1.29','1.30'], 'kubernetes-aks': ['1.27','1.28','1.29','1.30'], 'kubernetes-gke': ['1.28','1.29','1.30'], 'kubernetes-rancher': ['1.26','1.27','1.28'] },
-  '7.8.2-6': { 'kubernetes-community': ['1.28','1.29','1.30','1.31'], 'kubernetes-openshift': ['4.12','4.13','4.14','4.15','4.16'], 'kubernetes-eks': ['1.27','1.28','1.29','1.30'], 'kubernetes-aks': ['1.27','1.28','1.29','1.30'], 'kubernetes-gke': ['1.28','1.29','1.30'], 'kubernetes-rancher': ['1.26','1.27','1.28'] },
+  '7.8.6-1': { 'kubernetes-community': ['1.28','1.29','1.30','1.31','1.32'], 'kubernetes-openshift': ['4.15','4.16','4.17','4.18','4.19'], 'kubernetes-eks': ['1.28','1.29','1.30','1.31','1.32'], 'kubernetes-aks': ['1.28','1.29','1.30','1.31','1.32'], 'kubernetes-gke': ['1.28','1.29','1.30','1.31','1.32'], 'kubernetes-rancher': ['1.28','1.29','1.30','1.31','1.32'] },
+  '7.8.4-9': { 'kubernetes-community': ['1.28','1.29','1.30','1.31'], 'kubernetes-openshift': ['4.15','4.16','4.17','4.18'], 'kubernetes-eks': ['1.28','1.29','1.30','1.31'], 'kubernetes-aks': ['1.28','1.29','1.30','1.31'], 'kubernetes-gke': ['1.28','1.29','1.30','1.31'], 'kubernetes-rancher': ['1.28','1.29','1.30','1.31'] },
+  '7.8.4-8': { 'kubernetes-community': ['1.28','1.29','1.30','1.31'], 'kubernetes-openshift': ['4.15','4.16','4.17','4.18'], 'kubernetes-eks': ['1.28','1.29','1.30','1.31'], 'kubernetes-aks': ['1.28','1.29','1.30','1.31'], 'kubernetes-gke': ['1.28','1.29','1.30','1.31'], 'kubernetes-rancher': ['1.28','1.29','1.30','1.31'] },
+  '7.8.2-6': { 'kubernetes-community': ['1.28','1.29','1.30','1.31'], 'kubernetes-openshift': ['4.15','4.16','4.17','4.18'], 'kubernetes-eks': ['1.28','1.29','1.30','1.31'], 'kubernetes-aks': ['1.28','1.29','1.30','1.31'], 'kubernetes-gke': ['1.28','1.29','1.30','1.31'], 'kubernetes-rancher': ['1.28','1.29','1.30','1.31'] },
 
   // 7.4.x family
-  '7.4.6-2': { 'kubernetes-community': ['1.26','1.27','1.28','1.29','1.30'], 'kubernetes-openshift': ['4.12','4.13','4.14','4.15','4.16'], 'kubernetes-eks': ['1.26','1.27','1.28','1.29'], 'kubernetes-aks': ['1.27','1.28','1.29','1.30'], 'kubernetes-gke': ['1.27','1.28','1.29','1.30'], 'kubernetes-rancher': ['1.25','1.26','1.27','1.28'] },
-  '7.4.2-12': { 'kubernetes-community': ['1.26','1.27','1.28','1.29'], 'kubernetes-openshift': ['4.11','4.12','4.13','4.14','4.15'], 'kubernetes-eks': ['1.25','1.26','1.27','1.28'], 'kubernetes-aks': ['1.26','1.27','1.28','1.29'], 'kubernetes-gke': ['1.25','1.26','1.27','1.28','1.29'], 'kubernetes-rancher': ['1.25','1.26','1.27'] },
-  '7.4.2-2': { 'kubernetes-community': ['1.26','1.27','1.28','1.29'], 'kubernetes-openshift': ['4.11','4.12','4.13','4.14'], 'kubernetes-eks': ['1.25','1.26','1.27','1.28'], 'kubernetes-aks': ['1.26','1.27','1.28'], 'kubernetes-gke': ['1.25','1.26','1.27'], 'kubernetes-rancher': ['1.24','1.25','1.26','1.27'] },
+  '7.4.6-2': { 'kubernetes-community': ['1.26','1.27','1.28','1.29','1.30'], 'kubernetes-openshift': ['4.13','4.14','4.15','4.16','4.17'], 'kubernetes-eks': ['1.26','1.27','1.28','1.29','1.30'], 'kubernetes-aks': ['1.26','1.27','1.28','1.29','1.30'], 'kubernetes-gke': ['1.26','1.27','1.28','1.29','1.30'], 'kubernetes-rancher': ['1.26','1.27','1.28','1.29','1.30'] },
+  '7.4.2-12': { 'kubernetes-community': ['1.26','1.27','1.28','1.29'], 'kubernetes-openshift': ['4.13','4.14','4.15','4.16'], 'kubernetes-eks': ['1.26','1.27','1.28','1.29'], 'kubernetes-aks': ['1.26','1.27','1.28','1.29'], 'kubernetes-gke': ['1.26','1.27','1.28','1.29'], 'kubernetes-rancher': ['1.26','1.27','1.28','1.29'] },
+  '7.4.2-2': { 'kubernetes-community': ['1.26','1.27','1.28','1.29'], 'kubernetes-openshift': ['4.13','4.14','4.15','4.16'], 'kubernetes-eks': ['1.26','1.27','1.28','1.29'], 'kubernetes-aks': ['1.26','1.27','1.28','1.29'], 'kubernetes-gke': ['1.26','1.27','1.28','1.29'], 'kubernetes-rancher': ['1.26','1.27','1.28','1.29'] },
 
   // 7.2.x family
-  '7.2.4-12': { 'kubernetes-community': ['1.24','1.25','1.26','1.27','1.28'], 'kubernetes-openshift': ['4.11','4.12','4.13','4.14'], 'kubernetes-eks': ['1.23','1.24','1.25','1.26','1.27'], 'kubernetes-aks': ['1.25','1.26','1.27'], 'kubernetes-gke': ['1.24','1.25','1.26','1.27'], 'kubernetes-rancher': ['1.23','1.24','1.25','1.26'] },
-  '7.2.4-7': { 'kubernetes-community': ['1.24','1.25','1.26','1.27'], 'kubernetes-openshift': ['4.10','4.11','4.12','4.13'], 'kubernetes-eks': ['1.23','1.24','1.25','1.26','1.27'], 'kubernetes-aks': ['1.25','1.26','1.27'], 'kubernetes-gke': ['1.23','1.24','1.25','1.26','1.27'], 'kubernetes-rancher': ['1.23','1.24','1.25'] },
-  '7.2.4-2': { 'kubernetes-community': ['1.24','1.25','1.26','1.27'], 'kubernetes-openshift': ['4.10','4.11','4.12','4.13'], 'kubernetes-eks': ['1.23','1.24','1.25','1.26','1.27'], 'kubernetes-aks': ['1.25','1.26','1.27'], 'kubernetes-gke': ['1.23','1.24','1.25','1.26','1.27'], 'kubernetes-rancher': ['1.23','1.24','1.25'] },
+  '7.2.4-12': { 'kubernetes-community': ['1.24','1.25','1.26','1.27','1.28'], 'kubernetes-openshift': ['4.11','4.12','4.13','4.14','4.15'], 'kubernetes-eks': ['1.24','1.25','1.26','1.27','1.28'], 'kubernetes-aks': ['1.24','1.25','1.26','1.27','1.28'], 'kubernetes-gke': ['1.24','1.25','1.26','1.27','1.28'], 'kubernetes-rancher': ['1.24','1.25','1.26','1.27','1.28'] },
+  '7.2.4-7': { 'kubernetes-community': ['1.24','1.25','1.26','1.27'], 'kubernetes-openshift': ['4.11','4.12','4.13','4.14'], 'kubernetes-eks': ['1.24','1.25','1.26','1.27'], 'kubernetes-aks': ['1.24','1.25','1.26','1.27'], 'kubernetes-gke': ['1.24','1.25','1.26','1.27'], 'kubernetes-rancher': ['1.24','1.25','1.26','1.27'] },
+  '7.2.4-2': { 'kubernetes-community': ['1.24','1.25','1.26','1.27'], 'kubernetes-openshift': ['4.11','4.12','4.13','4.14'], 'kubernetes-eks': ['1.24','1.25','1.26','1.27'], 'kubernetes-aks': ['1.24','1.25','1.26','1.27'], 'kubernetes-gke': ['1.24','1.25','1.26','1.27'], 'kubernetes-rancher': ['1.24','1.25','1.26','1.27'] },
 
   // 6.4.x family
-  '6.4.2-8': { 'kubernetes-community': ['1.23','1.24','1.25','1.26','1.27'], 'kubernetes-openshift': ['4.10','4.11','4.12'], 'kubernetes-eks': ['1.22','1.23','1.24','1.25'], 'kubernetes-aks': ['1.23','1.24','1.25','1.26'], 'kubernetes-gke': ['1.22','1.23','1.24','1.25','1.26'], 'kubernetes-rancher': ['1.22','1.23','1.24'] },
-  '6.4.2-6': { 'kubernetes-community': ['1.23','1.24','1.25','1.26','1.27'], 'kubernetes-openshift': ['4.9','4.10','4.11','4.12'], 'kubernetes-eks': ['1.22','1.23','1.24','1.25'], 'kubernetes-aks': ['1.23','1.24','1.25','1.26'], 'kubernetes-gke': ['1.22','1.23','1.24','1.25','1.26'], 'kubernetes-rancher': ['1.22','1.23','1.24'] },
-  '6.4.2-5': { 'kubernetes-community': ['1.22','1.23','1.24','1.25','1.26'], 'kubernetes-openshift': ['4.8','4.9','4.10','4.11','4.12'], 'kubernetes-eks': ['1.22','1.23','1.24'], 'kubernetes-aks': ['1.23','1.24','1.25'], 'kubernetes-gke': ['1.22','1.23','1.24','1.25'], 'kubernetes-rancher': ['1.21','1.22','1.23','1.24'] },
-  '6.4.2-4': { 'kubernetes-community': ['1.22','1.23','1.24','1.25','1.26'], 'kubernetes-openshift': ['4.8','4.9','4.10','4.11','4.12'], 'kubernetes-eks': ['1.22','1.23','1.24'], 'kubernetes-aks': ['1.23','1.24','1.25'], 'kubernetes-gke': ['1.22','1.23','1.24','1.25'], 'kubernetes-rancher': ['1.21','1.22','1.23','1.24'] },
+  '6.4.2-8': { 'kubernetes-community': ['1.23','1.24','1.25','1.26','1.27'], 'kubernetes-openshift': ['4.10','4.11','4.12','4.13','4.14'], 'kubernetes-eks': ['1.23','1.24','1.25','1.26','1.27'], 'kubernetes-aks': ['1.23','1.24','1.25','1.26','1.27'], 'kubernetes-gke': ['1.23','1.24','1.25','1.26','1.27'], 'kubernetes-rancher': ['1.23','1.24','1.25','1.26','1.27'] },
+  '6.4.2-6': { 'kubernetes-community': ['1.23','1.24','1.25','1.26','1.27'], 'kubernetes-openshift': ['4.10','4.11','4.12','4.13','4.14'], 'kubernetes-eks': ['1.23','1.24','1.25','1.26','1.27'], 'kubernetes-aks': ['1.23','1.24','1.25','1.26','1.27'], 'kubernetes-gke': ['1.23','1.24','1.25','1.26','1.27'], 'kubernetes-rancher': ['1.23','1.24','1.25','1.26','1.27'] },
+  '6.4.2-5': { 'kubernetes-community': ['1.22','1.23','1.24','1.25','1.26'], 'kubernetes-openshift': ['4.9','4.10','4.11','4.12','4.13'], 'kubernetes-eks': ['1.22','1.23','1.24','1.25','1.26'], 'kubernetes-aks': ['1.22','1.23','1.24','1.25','1.26'], 'kubernetes-gke': ['1.22','1.23','1.24','1.25','1.26'], 'kubernetes-rancher': ['1.22','1.23','1.24','1.25','1.26'] },
+  '6.4.2-4': { 'kubernetes-community': ['1.22','1.23','1.24','1.25','1.26'], 'kubernetes-openshift': ['4.9','4.10','4.11','4.12','4.13'], 'kubernetes-eks': ['1.22','1.23','1.24','1.25','1.26'], 'kubernetes-aks': ['1.22','1.23','1.24','1.25','1.26'], 'kubernetes-gke': ['1.22','1.23','1.24','1.25','1.26'], 'kubernetes-rancher': ['1.22','1.23','1.24','1.25','1.26'] },
 
   // 6.2.x family
-  '6.2.18-41': { 'kubernetes-community': ['1.22','1.23','1.24','1.25'], 'kubernetes-openshift': ['4.8','4.9','4.10','4.11'], 'kubernetes-eks': ['1.21','1.22','1.23'], 'kubernetes-aks': ['1.22','1.23','1.24'], 'kubernetes-gke': ['1.21','1.22','1.23','1.24','1.25'], 'kubernetes-rancher': ['1.21','1.22','1.23','1.24'] },
-  '6.2.18-3': { 'kubernetes-community': ['1.22','1.23','1.24','1.25'], 'kubernetes-openshift': ['4.8','4.9','4.10','4.11'], 'kubernetes-eks': ['1.21','1.22','1.23'], 'kubernetes-aks': ['1.22','1.23','1.24'], 'kubernetes-gke': ['1.21','1.22','1.23','1.24','1.25'], 'kubernetes-rancher': ['1.21','1.22','1.23','1.24'] },
-  '6.2.12-1': { 'kubernetes-community': ['1.22','1.23','1.24'], 'kubernetes-openshift': ['4.7','4.8','4.9','4.10','4.11'], 'kubernetes-eks': ['1.21','1.22','1.23'], 'kubernetes-aks': ['1.22','1.23','1.24'], 'kubernetes-gke': ['1.21','1.22','1.23','1.24'], 'kubernetes-rancher': ['1.21','1.22','1.23'] },
-  '6.2.10-45': { 'kubernetes-community': ['1.21','1.22','1.23','1.24'], 'kubernetes-openshift': ['4.7','4.8','4.9','4.10'], 'kubernetes-eks': ['1.19','1.20','1.21','1.22'], 'kubernetes-aks': ['1.21','1.22','1.23'], 'kubernetes-gke': ['1.19','1.20','1.21','1.22','1.23'], 'kubernetes-rancher': ['1.19','1.20','1.21','1.22'] },
-  '6.2.10-34': { 'kubernetes-community': ['1.19','1.20','1.21','1.22','1.23'], 'kubernetes-openshift': ['4.6','4.7','4.8','4.9','4.10'], 'kubernetes-eks': ['1.18','1.19','1.20','1.21','1.22'], 'kubernetes-aks': ['1.19','1.20','1.21','1.22','1.23'], 'kubernetes-gke': ['1.19','1.20','1.21','1.22'], 'kubernetes-rancher': ['1.18','1.19','1.20','1.21','1.22'] },
-  '6.2.10-4': { 'kubernetes-community': ['1.18','1.19','1.20','1.21','1.22'], 'kubernetes-openshift': ['3.11','4.5','4.6','4.7','4.8','4.9'], 'kubernetes-eks': ['1.18','1.19','1.20','1.21'], 'kubernetes-aks': ['1.20','1.21','1.22'], 'kubernetes-gke': ['1.20','1.21','1.22'], 'kubernetes-rancher': ['1.17','1.18','1.19','1.20'] },
-  '6.2.8-15': { 'kubernetes-community': ['1.18','1.19','1.20','1.21','1.22'], 'kubernetes-openshift': ['3.11','4.5','4.6','4.7','4.8','4.9'], 'kubernetes-eks': ['1.18','1.19','1.20','1.21'], 'kubernetes-aks': ['1.19','1.20','1.21','1.22'], 'kubernetes-gke': ['1.19','1.20','1.21','1.22'], 'kubernetes-rancher': ['1.17','1.18','1.19','1.20'] },
-  '6.2.8-11': { 'kubernetes-community': ['1.18','1.19','1.20','1.21','1.22'], 'kubernetes-openshift': ['3.11','4.5','4.6','4.7','4.8','4.9'], 'kubernetes-eks': ['1.18','1.19','1.20','1.21'], 'kubernetes-aks': ['1.19','1.20','1.21','1.22'], 'kubernetes-gke': ['1.19','1.20','1.21','1.22'], 'kubernetes-rancher': ['1.17','1.18','1.19','1.20'] },
-  '6.2.8-2': { 'kubernetes-community': ['1.18','1.19','1.20','1.21'], 'kubernetes-openshift': ['3.11','4.5','4.6','4.7','4.8'], 'kubernetes-eks': ['1.18','1.19','1.20','1.21'], 'kubernetes-aks': ['1.19','1.20','1.21'], 'kubernetes-gke': ['1.19','1.20','1.21'], 'kubernetes-rancher': ['1.17','1.18','1.19','1.20'] },
-  '6.2.4-1': { 'kubernetes-community': ['1.16','1.17','1.18','1.19','1.20','1.21'], 'kubernetes-openshift': ['3.11','4.5','4.6','4.7','4.8'], 'kubernetes-eks': ['1.18','1.19','1.20','1.21'], 'kubernetes-aks': ['1.18','1.19'], 'kubernetes-gke': ['1.18','1.19','1.20','1.21'], 'kubernetes-rancher': ['1.17','1.18','1.19','1.20'] },
+  '6.2.18-41': { 'kubernetes-community': ['1.22','1.23','1.24','1.25'], 'kubernetes-openshift': ['4.9','4.10','4.11','4.12'], 'kubernetes-eks': ['1.22','1.23','1.24','1.25'], 'kubernetes-aks': ['1.22','1.23','1.24','1.25'], 'kubernetes-gke': ['1.22','1.23','1.24','1.25'], 'kubernetes-rancher': ['1.22','1.23','1.24','1.25'] },
+  '6.2.18-3': { 'kubernetes-community': ['1.22','1.23','1.24','1.25'], 'kubernetes-openshift': ['4.9','4.10','4.11','4.12'], 'kubernetes-eks': ['1.22','1.23','1.24','1.25'], 'kubernetes-aks': ['1.22','1.23','1.24','1.25'], 'kubernetes-gke': ['1.22','1.23','1.24','1.25'], 'kubernetes-rancher': ['1.22','1.23','1.24','1.25'] },
+  '6.2.12-1': { 'kubernetes-community': ['1.22','1.23','1.24'], 'kubernetes-openshift': ['4.9','4.10','4.11'], 'kubernetes-eks': ['1.22','1.23','1.24'], 'kubernetes-aks': ['1.22','1.23','1.24'], 'kubernetes-gke': ['1.22','1.23','1.24'], 'kubernetes-rancher': ['1.22','1.23','1.24'] },
+  '6.2.10-45': { 'kubernetes-community': ['1.21','1.22','1.23','1.24'], 'kubernetes-openshift': ['4.8','4.9','4.10','4.11'], 'kubernetes-eks': ['1.21','1.22','1.23','1.24'], 'kubernetes-aks': ['1.21','1.22','1.23','1.24'], 'kubernetes-gke': ['1.21','1.22','1.23','1.24'], 'kubernetes-rancher': ['1.21','1.22','1.23','1.24'] },
+  '6.2.10-34': { 'kubernetes-community': ['1.19','1.20','1.21','1.22','1.23'], 'kubernetes-openshift': ['4.6','4.7','4.8','4.9','4.10'], 'kubernetes-eks': ['1.19','1.20','1.21','1.22','1.23'], 'kubernetes-aks': ['1.19','1.20','1.21','1.22','1.23'], 'kubernetes-gke': ['1.19','1.20','1.21','1.22','1.23'], 'kubernetes-rancher': ['1.19','1.20','1.21','1.22','1.23'] },
+  '6.2.10-4': { 'kubernetes-community': ['1.18','1.19','1.20','1.21','1.22'], 'kubernetes-openshift': ['4.5','4.6','4.7','4.8','4.9'], 'kubernetes-eks': ['1.18','1.19','1.20','1.21','1.22'], 'kubernetes-aks': ['1.18','1.19','1.20','1.21','1.22'], 'kubernetes-gke': ['1.18','1.19','1.20','1.21','1.22'], 'kubernetes-rancher': ['1.18','1.19','1.20','1.21','1.22'] },
+  '6.2.8-15': { 'kubernetes-community': ['1.18','1.19','1.20','1.21','1.22'], 'kubernetes-openshift': ['4.5','4.6','4.7','4.8','4.9'], 'kubernetes-eks': ['1.18','1.19','1.20','1.21','1.22'], 'kubernetes-aks': ['1.18','1.19','1.20','1.21','1.22'], 'kubernetes-gke': ['1.18','1.19','1.20','1.21','1.22'], 'kubernetes-rancher': ['1.18','1.19','1.20','1.21','1.22'] },
+  '6.2.8-11': { 'kubernetes-community': ['1.18','1.19','1.20','1.21','1.22'], 'kubernetes-openshift': ['4.5','4.6','4.7','4.8','4.9'], 'kubernetes-eks': ['1.18','1.19','1.20','1.21','1.22'], 'kubernetes-aks': ['1.18','1.19','1.20','1.21','1.22'], 'kubernetes-gke': ['1.18','1.19','1.20','1.21','1.22'], 'kubernetes-rancher': ['1.18','1.19','1.20','1.21','1.22'] },
+  '6.2.8-2': { 'kubernetes-community': ['1.18','1.19','1.20','1.21'], 'kubernetes-openshift': ['4.5','4.6','4.7','4.8'], 'kubernetes-eks': ['1.18','1.19','1.20','1.21'], 'kubernetes-aks': ['1.18','1.19','1.20','1.21'], 'kubernetes-gke': ['1.18','1.19','1.20','1.21'], 'kubernetes-rancher': ['1.18','1.19','1.20','1.21'] },
+  '6.2.4-1': { 'kubernetes-community': ['1.16','1.17','1.18','1.19','1.20','1.21'], 'kubernetes-openshift': ['4.3','4.4','4.5','4.6','4.7','4.8'], 'kubernetes-eks': ['1.16','1.17','1.18','1.19','1.20','1.21'], 'kubernetes-aks': ['1.16','1.17','1.18','1.19','1.20','1.21'], 'kubernetes-gke': ['1.16','1.17','1.18','1.19','1.20','1.21'], 'kubernetes-rancher': ['1.16','1.17','1.18','1.19','1.20','1.21'] },
 };
 
 
@@ -1033,7 +1085,7 @@ export function buildEnvironmentSummaryHtml(selections) {
       </div>
       ${isK8sPlatform(selections.platform) && selections.k8sVersion ? `
       <div>
-        <dt>${selections.platform === 'kubernetes-openshift' ? 'OpenShift version' : 'Kubernetes version'}</dt>
+        <dt>${getK8sProductName(selections.platform)} version</dt>
         <dd>${escapeHtml(selections.k8sVersion)}</dd>
       </div>
       ` : ''}
