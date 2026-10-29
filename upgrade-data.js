@@ -17,6 +17,7 @@ const CLUSTER_VERSION_LABELS = {
   '8.0.18': '8.0.18',
   '8.0.20': '8.0.20',
   '8.2.0': '8.2.0',
+  '8.2.6': '8.2.6',
 };
 
 const DOCUMENTED_SOURCE_VERSIONS = [
@@ -31,8 +32,8 @@ const DOCUMENTED_SOURCE_VERSIONS = [
   '7.4',
   '7.8',
   '7.22',
-  // 8.0.x patch releases are valid sources for later 8.0.x/8.2.x targets. The
-  // latest available release (currently 8.2.0) is deliberately NOT listed —
+  // 8.0.x/8.2.x patch releases are valid sources for later 8.0.x/8.2.x targets.
+  // The latest available release (currently 8.2.6) is deliberately NOT listed —
   // there is no documented target to upgrade it to. When a newer release ships,
   // add the previous latest here and give it a DIRECT_CLUSTER_UPGRADE_PATHS row.
   '8.0.2',
@@ -41,14 +42,15 @@ const DOCUMENTED_SOURCE_VERSIONS = [
   '8.0.16',
   '8.0.18',
   '8.0.20',
+  '8.2.0',
 ];
 
-const DOCUMENTED_TARGET_VERSIONS = ['6.4', '7.2', '7.4', '7.8', '7.22', '8.0.2', '8.0.6', '8.0.10', '8.0.16', '8.0.18', '8.0.20', '8.2.0'];
+const DOCUMENTED_TARGET_VERSIONS = ['6.4', '7.2', '7.4', '7.8', '7.22', '8.0.2', '8.0.6', '8.0.10', '8.0.16', '8.0.18', '8.0.20', '8.2.0', '8.2.6'];
 
 // This selector uses the bundled Redis DB version families from the Redis docs'
 // "Default Redis database versions" table, not the separate default upgraded/new
 // database version column.
-const DOCUMENTED_DATABASE_VERSION_FAMILIES = ['6.0', '6.2', '7.2', '7.4', '8.0', '8.2', '8.4', '8.6'];
+const DOCUMENTED_DATABASE_VERSION_FAMILIES = ['6.0', '6.2', '7.2', '7.4', '8.0', '8.2', '8.4', '8.6', '8.8'];
 
 const DATABASE_VERSION_FAMILY_LABELS = {
   '6.0': '6.0',
@@ -59,6 +61,7 @@ const DATABASE_VERSION_FAMILY_LABELS = {
   '8.2': '8.2',
   '8.4': '8.4',
   '8.6': '8.6',
+  '8.8': '8.8',
 };
 
 const MODULE_NAME_LABELS = {
@@ -176,6 +179,11 @@ const DATABASE_COMPATIBILITY_BY_CLUSTER_VERSION = {
   // It under-claims on purpose — recommending a family the user's exact patch may
   // not bundle would be worse than recommending an older one.
   '8.0': ['6.2', '7.2', '7.4', '8.0', '8.2'],
+  // 8.2.x: 8.2.0 bundles up to 8.6; 8.2.6 adds Redis database 8.8 (its default stays 8.6).
+  // 8.2.6's bundle comes from its release notes — the upgrade-database table lags.
+  '8.2.0': ['6.2', '7.2', '7.4', '8.0', '8.2', '8.4', '8.6'],
+  '8.2.6': ['6.2', '7.2', '7.4', '8.0', '8.2', '8.4', '8.6', '8.8'],
+  // Fallback for an 8.2.x patch that is not listed above: the smallest 8.2.x bundle.
   '8.2': ['6.2', '7.2', '7.4', '8.0', '8.2', '8.4', '8.6'],
 };
 
@@ -289,20 +297,22 @@ const DIRECT_CLUSTER_UPGRADE_PATHS = {
   // 6.4 supports a direct upgrade to 8.0 only through 8.0.2/8.0.6/8.0.10. Reaching
   // 8.0.16, 8.0.18, or 8.0.20 requires an intermediate 7.x bridge version.
   '6.4': ['6.4', '7.2', '7.4', '7.8', '7.22', '8.0.2', '8.0.6', '8.0.10'],
-  '7.2': ['7.2', '7.4', '7.8', '7.22', '8.0.2', '8.0.6', '8.0.10', '8.0.16', '8.0.18', '8.0.20', '8.2.0'],
-  '7.4': ['7.4', '7.8', '7.22', '8.0.2', '8.0.6', '8.0.10', '8.0.16', '8.0.18', '8.0.20', '8.2.0'],
-  '7.8': ['7.8', '7.22', '8.0.2', '8.0.6', '8.0.10', '8.0.16', '8.0.18', '8.0.20', '8.2.0'],
-  '7.22': ['7.22', '8.0.2', '8.0.6', '8.0.10', '8.0.16', '8.0.18', '8.0.20', '8.2.0'],
+  '7.2': ['7.2', '7.4', '7.8', '7.22', '8.0.2', '8.0.6', '8.0.10', '8.0.16', '8.0.18', '8.0.20', '8.2.0', '8.2.6'],
+  '7.4': ['7.4', '7.8', '7.22', '8.0.2', '8.0.6', '8.0.10', '8.0.16', '8.0.18', '8.0.20', '8.2.0', '8.2.6'],
+  '7.8': ['7.8', '7.22', '8.0.2', '8.0.6', '8.0.10', '8.0.16', '8.0.18', '8.0.20', '8.2.0', '8.2.6'],
+  '7.22': ['7.22', '8.0.2', '8.0.6', '8.0.10', '8.0.16', '8.0.18', '8.0.20', '8.2.0', '8.2.6'],
   // Docs list two 8.0.x source bands: 8.0.2/8.0.6/8.0.10 can reach both 8.0.x
   // bands; 8.0.16/8.0.18/8.0.20 only the 8.0.16–8.0.20 band. Every 8.0.x source
   // can also reach 8.2.x. Exact-patch sources list only later versions (same
   // pattern as the 6.2.x rows).
-  '8.0.2': ['8.0.6', '8.0.10', '8.0.16', '8.0.18', '8.0.20', '8.2.0'],
-  '8.0.6': ['8.0.10', '8.0.16', '8.0.18', '8.0.20', '8.2.0'],
-  '8.0.10': ['8.0.16', '8.0.18', '8.0.20', '8.2.0'],
-  '8.0.16': ['8.0.18', '8.0.20', '8.2.0'],
-  '8.0.18': ['8.0.20', '8.2.0'],
-  '8.0.20': ['8.2.0'],
+  '8.0.2': ['8.0.6', '8.0.10', '8.0.16', '8.0.18', '8.0.20', '8.2.0', '8.2.6'],
+  '8.0.6': ['8.0.10', '8.0.16', '8.0.18', '8.0.20', '8.2.0', '8.2.6'],
+  '8.0.10': ['8.0.16', '8.0.18', '8.0.20', '8.2.0', '8.2.6'],
+  '8.0.16': ['8.0.18', '8.0.20', '8.2.0', '8.2.6'],
+  '8.0.18': ['8.0.20', '8.2.0', '8.2.6'],
+  '8.0.20': ['8.2.0', '8.2.6'],
+  // The docs' "8.2.x" row/column: any 8.2.x release can upgrade to a later 8.2.x.
+  '8.2.0': ['8.2.6'],
 };
 
 export const OS_UPGRADE_DOC_URL =
@@ -342,6 +352,10 @@ export function isInDownloadCenter(clusterVersion) {
 
 export function getDatabaseVersionFamily(version) {
   if (!version) return version;
+  if (version.startsWith('8.8.')) {
+    return '8.8';
+  }
+
   if (version.startsWith('8.6.')) {
     return '8.6';
   }
@@ -611,7 +625,7 @@ export function getRecommendedTargetDatabaseFamily(clusterVersion) {
 // satisfies all three constraints (in source's bundles, in target's bundles,
 // not below the current family). Empty string if none — e.g., when there's no
 // safe step and a different cluster path is required.
-const DATABASE_FAMILY_ORDER = ['6.0', '6.2', '7.2', '7.4', '8.0', '8.2', '8.4', '8.6'];
+const DATABASE_FAMILY_ORDER = ['6.0', '6.2', '7.2', '7.4', '8.0', '8.2', '8.4', '8.6', '8.8'];
 
 export function getPreClusterUpgradeDatabaseFamily(sourceClusterVersion, targetClusterVersion, currentDatabaseFamily) {
   const sourceSupported = getBundledDatabaseFamilies(sourceClusterVersion);
@@ -707,6 +721,12 @@ export const DATABASE_BREAKING_CHANGES = {
   },
   '8.6': {
     source: 'https://redis.io/docs/latest/develop/whats-new/8-6/#breaking-changes',
+    label: null,
+    dataAvailable: false,
+    items: [],
+  },
+  '8.8': {
+    source: 'https://redis.io/docs/latest/develop/whats-new/8-8/#breaking-changes',
     label: null,
     dataAvailable: false,
     items: [],
@@ -905,7 +925,7 @@ export function getSupportedK8sVersions(operatorVersionFamily, platform) {
 // Source: https://redis.io/docs/latest/operate/kubernetes/reference/supported_k8s_distributions/
 // Regenerate with: ./_parse_k8s_matrix.py --write
 export const SUPPORTED_OPERATOR_VERSIONS = [
-  '8.2.0-12',
+  '8.2.6-21', '8.2.0-12',
   '8.0.20-21', '8.0.18-11', '8.0.10-15', '8.0.6-6', '8.0.2-2',
   '7.22.2-21', '7.22.0-15', '7.22.0-7',
   '7.8.6-1', '7.8.4-9', '7.8.4-8', '7.8.2-6',
@@ -927,6 +947,7 @@ export const SUPPORTED_OPERATOR_VERSIONS = [
 // Regenerate with: ./_parse_k8s_matrix.py --write
 export const OPERATOR_K8S_COMPATIBILITY = {
   // 8.2.x family
+  '8.2.6-21': { 'kubernetes-community': ['1.32','1.33','1.34','1.35','1.36'], 'kubernetes-openshift': ['4.19','4.20','4.21','4.22'], 'kubernetes-eks': ['1.32','1.33','1.34','1.35','1.36'], 'kubernetes-aks': ['1.32','1.33','1.34','1.35','1.36'], 'kubernetes-gke': ['1.32','1.33','1.34','1.35','1.36'], 'kubernetes-rancher': ['1.32','1.33','1.34','1.35','1.36'] },
   '8.2.0-12': { 'kubernetes-community': ['1.32','1.33','1.34','1.35','1.36'], 'kubernetes-openshift': ['4.19','4.20','4.21','4.22'], 'kubernetes-eks': ['1.32','1.33','1.34','1.35','1.36'], 'kubernetes-aks': ['1.32','1.33','1.34','1.35','1.36'], 'kubernetes-gke': ['1.32','1.33','1.34','1.35','1.36'], 'kubernetes-rancher': ['1.32','1.33','1.34','1.35','1.36'] },
 
   // 8.0.x family
@@ -1022,7 +1043,16 @@ export const CLUSTER_FAMILY_ORDER = ['6.0', '6.2', '6.4', '7.2', '7.4', '7.8', '
 // cluster version. SUPPORTED_OPERATOR_VERSIONS is ordered newest-first, so the
 // first family match is the newest. Returns undefined when the family has no
 // operator data.
+//
+// A cluster version that names a patch (8.2.0, 8.0.10, 6.2.10) has operator releases
+// of its own (8.2.0-12), and those win: a warning about an 8.2.0 target must name the
+// 8.2.0 operator, not a newer 8.2.x one. Family-level versions (7.22, 6.4) and patches
+// without an operator of their own (8.0.16) fall back to the family's newest.
 export function getNewestOperatorForClusterVersion(clusterVersion) {
+  if (/^\d+\.\d+\.\d+$/.test(clusterVersion ?? '')) {
+    const exact = SUPPORTED_OPERATOR_VERSIONS.find((v) => v.startsWith(clusterVersion + '-'));
+    if (exact) return exact;
+  }
   const family = getClusterVersionFamily(clusterVersion);
   return SUPPORTED_OPERATOR_VERSIONS.find((v) => v.startsWith(family + '.'));
 }

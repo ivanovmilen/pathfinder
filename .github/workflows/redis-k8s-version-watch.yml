@@ -1,4 +1,4 @@
-name: Watch Redis support pages (K8s + OS)
+name: Watch Redis support pages (K8s, OS, releases)
 
 on:
   schedule:
@@ -72,13 +72,57 @@ jobs:
                   if '&#x2705;' in cell or ':warning:' in cell or '&#x26a0;' in cell:
                       os_pairs.append(f'os {name} @ {v}')
 
+          # --- Release-notes indexes: new Redis Software releases and the Redis
+          #     database versions each one bundles. The K8s and platforms pages only
+          #     reveal a release indirectly (a new operator, a new OS column); these
+          #     indexes list it the day it ships — "release 8.2.6", and
+          #     "bundles 8.2.6 8.8" when a release brings a new database family.
+          import subprocess
+          RN = 'https://redis.io/docs/latest/operate/rs/release-notes/'
+
+          def fetch(url):
+              # curl, not urllib: redis.io answers Python's default User-Agent with 403.
+              # -f + check=True make a moved page fail the job instead of passing silently.
+              return subprocess.run(['curl', '-fsSL', '--max-time', '30', url],
+                                    check=True, capture_output=True, text=True).stdout
+
+          def families(cell):
+              return sorted({'.'.join(v.split('.')[:2]) for v in re.findall(r'\d+\.\d+(?:\.\d+)?', cell)})
+
+          def table_rows(text):
+              return [[c.strip() for c in l.strip().strip('|').split('|')]
+                      for l in text.splitlines() if l.startswith('|')]
+
+          release_lines, line_links = [], []
+          for cells in table_rows(fetch(RN + 'index.html.md')):
+              m = re.match(r'\[(\d+\.\d+\.x) releases\]\((\S+?)\)', cells[0])
+              if not m or len(cells) < 3:
+                  continue
+              release_lines.append(f'line {m.group(1)}')
+              release_lines += [f'line-bundles {m.group(1)} {f}' for f in families(cells[-1])]
+              line_links.append(m.group(2))
+          assert line_links, 'no release lines found in the release-notes index — page layout changed?'
+
+          # Per-release detail for the two newest lines (the index lists newest first),
+          # so a future 8.4.x line is followed without editing this workflow.
+          for link in line_links[:2]:
+              assert link.startswith(RN), f'unexpected release-line link: {link}'
+              for cells in table_rows(fetch(link.rstrip('/') + '/index.html.md')):
+                  m = re.match(r'\[(\d+\.\d+\.\d+)-\d+\b', cells[0])
+                  if not m or len(cells) < 3:
+                      continue
+                  release_lines.append(f'release {m.group(1)}')
+                  release_lines += [f'bundles {m.group(1)} {f}' for f in families(cells[-1])]
+
           lines = ([f'operator {v}'   for v in operators]
                  + [f'kubernetes {v}' for v in k8s]
                  + [f'openshift {v}'  for v in osh]
-                 + sorted(set(os_pairs)))
+                 + sorted(set(os_pairs))
+                 + sorted(set(release_lines)))
           open('current.txt', 'w').write('\n'.join(lines) + '\n')
           # A silently broken extraction must fail loudly, not report "no change".
           assert operators and k8s and os_pairs, 'extraction produced no versions — page layout changed?'
+          assert any(l.startswith('release ') for l in release_lines), 'no releases found in the release-notes indexes'
           PY
 
       - name: Compare with previous run
@@ -91,15 +135,25 @@ jobs:
             echo "save=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
+          # A baseline saved before a kind of line existed (e.g. "release") has none of
+          # it, so every current line of that kind would be reported as new. Seed those
+          # lines into the baseline silently; real changes are still reported below.
+          seeded=false
+          for kind in release bundles line line-bundles; do
+            if ! grep -q "^$kind " state/versions.txt; then
+              grep "^$kind " current.txt >> state/versions.txt || true
+              seeded=true
+            fi
+          done
           added=$(comm -13 <(sort state/versions.txt) <(sort current.txt))
           removed=$(comm -23 <(sort state/versions.txt) <(sort current.txt))
           if [ -z "$added" ] && [ -z "$removed" ]; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
-            echo "save=false" >> "$GITHUB_OUTPUT"
+            echo "save=$seeded" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           {
-            echo "Redis version-support pages changed ([K8s distributions](https://redis.io/docs/latest/operate/kubernetes/reference/supported_k8s_distributions/) / [supported platforms](https://redis.io/docs/latest/operate/rs/references/supported-platforms/)):"
+            echo "Redis version-support pages changed ([K8s distributions](https://redis.io/docs/latest/operate/kubernetes/reference/supported_k8s_distributions/) / [supported platforms](https://redis.io/docs/latest/operate/rs/references/supported-platforms/) / [release notes](https://redis.io/docs/latest/operate/rs/release-notes/)):"
             echo
             if [ -n "$added" ]; then
               echo "### 🆕 Added"; echo '```'; echo "$added"; echo '```'
@@ -108,7 +162,12 @@ jobs:
               echo "### ❌ Removed (support dropped / EOL)"; echo '```'; echo "$removed"; echo '```'
             fi
             echo
-            echo "**Pathfinder follow-up:** for \`operator\`/\`kubernetes\`/\`openshift\` lines update \`SUPPORTED_OPERATOR_VERSIONS\`, \`OPERATOR_K8S_COMPATIBILITY\`, and \`K8S_SUPPORT_MATRIX\`; for \`os\` lines update \`OS_SUPPORT_BY_CLUSTER_VERSION\` and \`OPTIONS.operatingSystems\` in \`upgrade-data.js\` (and the source/target version lists if a new Redis Software release shipped)."
+            echo '**Pathfinder follow-up**, by kind of line:'
+            echo '- `operator` / `kubernetes` / `openshift`: run `./_parse_k8s_matrix.py --write` and review the diff.'
+            echo '- `os`: update `OS_SUPPORT_BY_CLUSTER_VERSION` (and `OPTIONS.operatingSystems` for a new OS) in `upgrade-data.js`.'
+            echo '- `release` (a new Redis Software version): add it to `CLUSTER_VERSION_LABELS`, `DOCUMENTED_TARGET_VERSIONS` and `DIRECT_CLUSTER_UPGRADE_PATHS`; the previous latest release becomes a source.'
+            echo '- `bundles` / `line-bundles` (a database family a release ships): update `DATABASE_COMPATIBILITY_BY_CLUSTER_VERSION`; for a brand-new family also extend the database-family lists and run `./_parse_ce_breaking_changes.py`.'
+            echo '- `line` (a new X.Y.x release line): follow its OS and upgrade-path data too; this workflow already tracks the two newest lines.'
           } > report.md
           cp current.txt state/versions.txt
           echo "changed=true" >> "$GITHUB_OUTPUT"

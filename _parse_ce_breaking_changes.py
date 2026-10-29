@@ -14,7 +14,7 @@ The page headings are inconsistent across releases:
 - 7.2 uses "### Breaking changes" (a single prose paragraph)
 - 7.4 uses "### Behavior changes" (prose)
 - 8.0 uses "### Breaking changes" with "#### " sub-areas (ACL, Search, ...)
-- 8.2 / 8.4 have no breaking/behavior section at all
+- 8.2 / 8.4 / 8.6 / 8.8 have no breaking/behavior section at all
 
 So we match any heading whose text starts with "breaking"/"behavior changes"/
 "backward", capture until the next same-or-higher heading, and treat deeper
@@ -40,6 +40,8 @@ FAMILY_SLUGS = {
     '8.0': '8-0',
     '8.2': '8-2',
     '8.4': '8-4',
+    '8.6': '8-6',
+    '8.8': '8-8',
 }
 
 # Families the app models but which have no whats-new page to scrape. Emitted
