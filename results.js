@@ -715,10 +715,9 @@ function renderBreakingChangesSummary(selections) {
     })
     .join(', ');
   const gapsHtml = result.gaps.length
-    ? `<p class="status-copy breaking-changes-gap"><strong>Heads up:</strong> Redis
-        ${gapLinksHtml}
-        ${result.gaps.length === 1 ? 'has' : 'have'} no machine-readable breaking-change list in Pathfinder yet — review the linked
-        release notes for ${result.gaps.length === 1 ? 'that version' : 'those versions'} directly.</p>`
+    ? `<p class="status-copy breaking-changes-gap"><strong>Heads up:</strong> no list of
+        breaking changes has been published for Redis ${gapLinksHtml}, so Pathfinder can't show one.
+        Review the linked release notes before upgrading.</p>`
     : '';
 
   breakingChangesSummary.innerHTML = `

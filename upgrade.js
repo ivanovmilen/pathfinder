@@ -78,10 +78,10 @@ function buildDatabaseBreakingChangesHtml(fromFamily, toFamily) {
         return `
           <div class="breaking-changes-entry">
             <h5>Redis ${escapeHtml(familyLabel)}</h5>
-            <p class="status-copy">No breaking-change list is published for this release in
-              Pathfinder yet. Review the
+            <p class="status-copy">Redis has not published a list of breaking changes for this
+              version, so Pathfinder can't show one. Review its
               <a href="${escapeHtml(entry.source)}" target="_blank" rel="noreferrer">release notes</a>
-              directly before upgrading.</p>
+              before upgrading.</p>
           </div>
         `;
       }
