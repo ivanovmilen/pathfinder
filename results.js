@@ -466,7 +466,7 @@ function renderUpgradePathResult(selections) {
           For large version jumps, deploying a new target cluster may be a more practical option than upgrading through multiple intermediate versions.
         </p>
         <p class="status-copy">
-          Data can be moved to the new cluster using either <a href="https://redis.github.io/riotx/index.html" target="_blank" rel="noreferrer">Riot-X</a> or <a href="https://redis.io/docs/latest/operate/rs/databases/import-export/replica-of/" target="_blank" rel="noreferrer">Replica Of</a>.
+          Data can be moved to the new cluster using either <a href="https://redis.io/docs/latest/integrate/riot/" target="_blank" rel="noreferrer">Riot-X</a> or <a href="https://redis.io/docs/latest/operate/rs/databases/import-export/replica-of/" target="_blank" rel="noreferrer">Replica Of</a>.
         </p>
       `
       : '';

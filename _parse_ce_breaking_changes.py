@@ -138,6 +138,19 @@ def parse_page(md):
     return True, label, items
 
 
+# Redis's own notes sometimes send readers to the open-source GitHub releases page.
+# This tool serves Redis Software users, so those links are repointed at the
+# redis.io page the note came from instead.
+GITHUB_RELEASES = re.compile(r'https://github\.com/redis/redis/releases[^\s)]*')
+
+
+def point_links_at_docs(items, source):
+    return [
+        {'area': item['area'], 'notes': [GITHUB_RELEASES.sub(source, n) for n in item['notes']]}
+        for item in items
+    ]
+
+
 def js_string(value):
     return "'" + value.replace('\\', '\\\\').replace("'", "\\'") + "'"
 
@@ -184,11 +197,12 @@ def main():
     for family, slug in FAMILY_SLUGS.items():
         md = piped or fetch(slug)
         found, label, items = parse_page(md)
+        source = DOC_URL_TEMPLATE.format(slug=slug) + '#breaking-changes'
         records[family] = {
-            'source': DOC_URL_TEMPLATE.format(slug=slug) + '#breaking-changes',
+            'source': source,
             'label': label,
             'dataAvailable': found,
-            'items': items,
+            'items': point_links_at_docs(items, source),
         }
         if piped:
             break  # single page on stdin — only one family makes sense
