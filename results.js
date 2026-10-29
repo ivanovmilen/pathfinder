@@ -702,12 +702,23 @@ function renderBreakingChangesSummary(selections) {
     ? `<strong>${result.itemCount}</strong> documented breaking-change area${result.itemCount === 1 ? '' : 's'} to review when upgrading your database from Redis ${escapeHtml(sourceLabel)} to ${escapeHtml(targetLabel)}.`
     : `Upgrading your database from Redis ${escapeHtml(sourceLabel)} to ${escapeHtml(targetLabel)} crosses ${result.entries.length} Redis release${result.entries.length === 1 ? '' : 's'}.`;
 
+  // Link each version without a breaking-change list to its own "What's new" page
+  // (the same source the wizard links to), instead of one generic catch-all link.
+  const sourceByFamily = new Map(result.entries.map((entry) => [entry.family, entry.source]));
+  const gapLinksHtml = result.gaps
+    .map((family) => {
+      const label = escapeHtml(getDatabaseVersionFamilyLabel(family));
+      const source = sourceByFamily.get(family);
+      return source
+        ? `<a href="${escapeHtml(source)}" target="_blank" rel="noreferrer">${label}</a>`
+        : label;
+    })
+    .join(', ');
   const gapsHtml = result.gaps.length
     ? `<p class="status-copy breaking-changes-gap"><strong>Heads up:</strong> Redis
-        ${result.gaps.map((family) => escapeHtml(getDatabaseVersionFamilyLabel(family))).join(', ')}
-        ${result.gaps.length === 1 ? 'has' : 'have'} no machine-readable breaking-change list in Pathfinder yet — review
-        <a href="https://github.com/redis/redis/releases" target="_blank" rel="noreferrer">the Redis release notes</a>
-        for ${result.gaps.length === 1 ? 'that version' : 'those versions'} directly.</p>`
+        ${gapLinksHtml}
+        ${result.gaps.length === 1 ? 'has' : 'have'} no machine-readable breaking-change list in Pathfinder yet — review the linked
+        release notes for ${result.gaps.length === 1 ? 'that version' : 'those versions'} directly.</p>`
     : '';
 
   breakingChangesSummary.innerHTML = `
