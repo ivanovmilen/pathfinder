@@ -1,5 +1,6 @@
 import {
   OPTIONS,
+  canClusterHaveRedisGraph,
   escapeHtml,
   getClusterVersionFamily,
   getDatabaseCompatibility,
@@ -35,6 +36,7 @@ const formControls = {
 };
 
 const k8sDistributionFieldWrapper = document.querySelector('#k8s-distribution-field');
+const redisGraphFieldWrapper = document.querySelector('#redis-graph-field');
 const k8sVersionFieldWrapper = document.querySelector('#k8s-version-field');
 const k8sVersionLabelElement = document.querySelector('label[for="k8s-version"]');
 
@@ -353,6 +355,19 @@ function syncModuleOptions() {
   });
 }
 
+// Hide the RedisGraph question when the chosen source version is too new to carry
+// RedisGraph, and clear any tick so a stale answer is never submitted.
+function syncRedisGraphField() {
+  if (!redisGraphFieldWrapper || !formControls.redisGraph) return;
+  const possible = canClusterHaveRedisGraph(formControls.sourceVersion.value);
+  redisGraphFieldWrapper.hidden = !possible;
+  if (!possible) {
+    formControls.redisGraph.checked = false;
+    const toggle = redisGraphFieldWrapper.querySelector('.field-help-toggle');
+    if (toggle) setHelpToggleOpen(toggle, false);
+  }
+}
+
 function syncSourceAwareOptions() {
   syncTargetVersionOptions();
   syncDatabaseVersionOptions();
@@ -360,6 +375,7 @@ function syncSourceAwareOptions() {
   syncOperatingSystemOptions();
   syncModuleOptions();
   syncK8sVersionOptions();
+  syncRedisGraphField();
 }
 
 function getSelections() {
@@ -563,7 +579,7 @@ function restoreFormFromStorage() {
     formControls.activeActive.checked = true;
   }
 
-  if (selections.redisGraph && formControls.redisGraph) {
+  if (selections.redisGraph && formControls.redisGraph && canClusterHaveRedisGraph(selections.sourceVersion)) {
     formControls.redisGraph.checked = true;
   }
 

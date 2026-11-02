@@ -173,25 +173,27 @@
               Check installed modules with <a href="https://redis.io/docs/latest/operate/rs/references/rest-api/" target="_blank" rel="noreferrer">REST API</a>
               <code class="field-command">curl -k -u &lt;user&gt;:&lt;password&gt; https://&lt;cluster-host&gt;:9443/v1/bdbs | jq '.[] | {name, uid, redis_version, module_list}'</code>
             </aside>
-            <div class="checkbox-row">
-              <label class="checkbox-label">
-                <input type="checkbox" id="redis-graph" />
-                RedisGraph (deprecated) is installed
-              </label>
-              <button
-                type="button"
-                class="field-help-toggle"
-                aria-label="Why RedisGraph matters for the upgrade"
-                aria-controls="redis-graph-help"
-                aria-expanded="false"
-              >
-                i
-              </button>
+            <div id="redis-graph-field">
+              <div class="checkbox-row">
+                <label class="checkbox-label">
+                  <input type="checkbox" id="redis-graph" />
+                  RedisGraph (deprecated) is installed
+                </label>
+                <button
+                  type="button"
+                  class="field-help-toggle"
+                  aria-label="Why RedisGraph matters for the upgrade"
+                  aria-controls="redis-graph-help"
+                  aria-expanded="false"
+                >
+                  i
+                </button>
+              </div>
+              <aside id="redis-graph-help" class="field-help-panel field-help-panel-wide" hidden>
+                <span>RedisGraph is end-of-life: Redis ended support for it on January 31, 2025. Tick this if any database, or the cluster itself, has the <code>graph</code> module.</span>
+                <span>To check, run the command above and look for <code>graph</code> in each database's <code>module_list</code>.</span>
+              </aside>
             </div>
-            <aside id="redis-graph-help" class="field-help-panel field-help-panel-wide" hidden>
-              <span>RedisGraph is end-of-life: Redis ended support for it on January 31, 2025. Tick this if any database, or the cluster itself, has the <code>graph</code> module.</span>
-              <span>To check, run the command above and look for <code>graph</code> in each database's <code>module_list</code>.</span>
-            </aside>
           </div>
 
             <div class="form-actions">

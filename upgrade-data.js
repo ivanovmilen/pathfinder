@@ -218,6 +218,19 @@ export function isK8sPlatform(value) {
 export const REDISGRAPH_END_OF_SUPPORT = 'January 31, 2025';
 const REDISGRAPH_LAST_ADVISED_FAMILY = '6.4';
 
+// Redis Software 8.0 and later rejects clusters that still have deprecated modules such as
+// RedisGraph (the pre-upgrade check aborts an upgrade into 8.x while a database uses it), so
+// a cluster already on 8.x cannot be carrying it and the form does not ask. Sources before
+// 8.0 can still hold it, including 7.x clusters upgraded from 6.x. Change this one constant
+// if Redis turns out to enforce it from a different version.
+const REDISGRAPH_REJECTED_FROM_FAMILY = '8.0';
+
+export function canClusterHaveRedisGraph(sourceVersion) {
+  if (!sourceVersion) return true; // nothing chosen yet: keep the question visible
+  const index = CLUSTER_FAMILY_ORDER.indexOf(getClusterVersionFamily(sourceVersion));
+  return index < CLUSTER_FAMILY_ORDER.indexOf(REDISGRAPH_REJECTED_FROM_FAMILY);
+}
+
 export function isBeyondRedisGraphSupport(clusterVersion) {
   const limit = CLUSTER_FAMILY_ORDER.indexOf(REDISGRAPH_LAST_ADVISED_FAMILY);
   const index = CLUSTER_FAMILY_ORDER.indexOf(getClusterVersionFamily(clusterVersion));
