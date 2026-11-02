@@ -25,6 +25,7 @@ const formControls = {
   databaseVersion: document.querySelector('#database-version'),
   targetDatabaseVersion: document.querySelector('#target-database-version'),
   activeActive: document.querySelector('#active-active'),
+  redisGraph: document.querySelector('#redis-graph'),
   modules: document.querySelector('#installed-modules'),
   // operatingSystem is null on kubernetes.html (field not present)
   operatingSystem: document.querySelector('#operating-system'),
@@ -368,6 +369,7 @@ function getSelections() {
     databaseVersion: formControls.databaseVersion.value,
     targetDatabaseVersion: formControls.targetDatabaseVersion?.value ?? '',
     activeActive: formControls.activeActive.checked,
+    redisGraph: formControls.redisGraph?.checked ?? false,
     modules: getSelectedModuleValues(),
     // operatingSystem is absent on kubernetes.html — fall back to empty string
     operatingSystem: formControls.operatingSystem?.value ?? '',
@@ -559,6 +561,10 @@ function restoreFormFromStorage() {
 
   if (selections.activeActive) {
     formControls.activeActive.checked = true;
+  }
+
+  if (selections.redisGraph && formControls.redisGraph) {
+    formControls.redisGraph.checked = true;
   }
 
   if (Array.isArray(selections.modules) && selections.modules.length) {

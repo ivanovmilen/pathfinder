@@ -19,6 +19,8 @@ import {
   getOsUpgradeTargetOptions,
   getPreClusterUpgradeDatabaseFamily,
   isInDownloadCenter,
+  REDISGRAPH_END_OF_SUPPORT,
+  isBeyondRedisGraphSupport,
   isK8sPlatform,
   labelForOperatingSystem,
   labelForPlatform,
@@ -327,6 +329,41 @@ function renderPathGuidanceHtml({ pros, cons }) {
   return `<div class="process-summary-guidance">${prosHtml}${consHtml}</div>`;
 }
 
+// Notice shown when the user flagged RedisGraph, which Redis has ended support for.
+// Redis's end-of-life announcement advises Redis Enterprise Software customers not to
+// upgrade beyond 6.4 unless otherwise requested: a target above 6.4 gets a warning, a
+// target at or below it a quiet note. It is advisory — the plan is still shown.
+function buildRedisGraphNoticeHtml(selections, targetLabel) {
+  if (!selections.redisGraph) return '';
+
+  if (isBeyondRedisGraphSupport(selections.targetVersion)) {
+    return `
+      <section class="warning-panel">
+        <h3>Redis advises against upgrading beyond 6.4 with RedisGraph</h3>
+        <p class="status-copy">
+          RedisGraph is end-of-life. Redis&rsquo;s announcement advises Redis Enterprise Software customers
+          not to upgrade beyond 6.4 &ldquo;unless otherwise requested&rdquo;, and Redis provides no support for
+          databases that use RedisGraph after ${REDISGRAPH_END_OF_SUPPORT}. This plan upgrades to
+          <strong>${escapeHtml(targetLabel)}</strong>.
+          <strong>Before you go ahead, contact Redis Support or your Technical Account Manager (TAM)</strong>
+          to discuss your RedisGraph databases.
+        </p>
+      </section>
+    `;
+  }
+
+  return `
+    <section class="warning-panel">
+      <h3>RedisGraph is end-of-life</h3>
+      <p class="status-copy">
+        Redis ended support for RedisGraph on ${REDISGRAPH_END_OF_SUPPORT}, and advises against going beyond
+        Redis Software 6.4. This upgrade to <strong>${escapeHtml(targetLabel)}</strong> stays within that limit.
+        For help with RedisGraph databases, contact Redis Support or your TAM.
+      </p>
+    </section>
+  `;
+}
+
 function renderProcessSummary(selections, upgradePaths, osUpgradeRequired, isDirect) {
   if (!processSummary || !upgradePaths.length) return;
 
@@ -528,6 +565,7 @@ function renderUpgradePathResult(selections) {
       } catch {
         // Storage failure is non-fatal; the wizard will rebuild paths on load.
       }
+      guideOutput.innerHTML += buildRedisGraphNoticeHtml(selections, targetLabel);
       renderProcessSummary(selections, upgradePaths, indirectOsUpgradeRequired, false);
       return { feasible: true, osUpgradeRequired: indirectOsUpgradeRequired, indirect: true };
     }
@@ -630,6 +668,7 @@ function renderUpgradePathResult(selections) {
       </section>
     `
     : '';
+  guideOutput.innerHTML += buildRedisGraphNoticeHtml(selections, targetLabel);
 
   // Store direct path info for the upgrade wizard.
   // Wrapped in its own try/catch so a storage failure cannot prevent the

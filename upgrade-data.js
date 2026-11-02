@@ -211,6 +211,19 @@ export function isK8sPlatform(value) {
   return typeof value === 'string' && value.startsWith('kubernetes-');
 }
 
+// RedisGraph is end-of-life. Redis's announcement (https://redis.io/blog/redisgraph-eol/)
+// ended support on January 31, 2025, and advises Redis Enterprise Software customers not
+// to upgrade beyond 6.4 unless otherwise requested. The app cannot detect RedisGraph, so
+// users flag it on the form; these helpers decide whether a target is past that limit.
+export const REDISGRAPH_END_OF_SUPPORT = 'January 31, 2025';
+const REDISGRAPH_LAST_ADVISED_FAMILY = '6.4';
+
+export function isBeyondRedisGraphSupport(clusterVersion) {
+  const limit = CLUSTER_FAMILY_ORDER.indexOf(REDISGRAPH_LAST_ADVISED_FAMILY);
+  const index = CLUSTER_FAMILY_ORDER.indexOf(getClusterVersionFamily(clusterVersion));
+  return index > limit;
+}
+
 // What to call the version the user picked for their platform. OpenShift uses its
 // own 4.x numbering (4.19, 4.20…), so labelling it "Kubernetes version" misleads
 // people into entering the underlying Kubernetes version (1.32, 1.33…) instead.
@@ -1129,6 +1142,12 @@ export function buildEnvironmentSummaryHtml(selections) {
         <dt>Installed modules</dt>
         <dd>${escapeHtml(getModuleSelectionCopy(selectedModules))}</dd>
       </div>
+      ${selections.redisGraph ? `
+      <div>
+        <dt>RedisGraph module</dt>
+        <dd>Installed (deprecated)</dd>
+      </div>
+      ` : ''}
       <div>
         <dt>Active-Active (CRDB)</dt>
         <dd>${selections.activeActive ? 'Yes' : 'No'}</dd>

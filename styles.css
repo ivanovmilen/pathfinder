@@ -257,14 +257,16 @@ h1 {
   color: var(--accent-strong);
 }
 
-.active-active-row {
+.active-active-row,
+.checkbox-row {
   display: flex;
   align-items: center;
   gap: 0.5rem;
   margin-top: 0.15rem;
 }
 
-.active-active-label {
+.active-active-label,
+.checkbox-label {
   display: inline-flex;
   align-items: center;
   gap: 0.5rem;
@@ -274,7 +276,8 @@ h1 {
   cursor: pointer;
 }
 
-.active-active-label input[type='checkbox'] {
+.active-active-label input[type='checkbox'],
+.checkbox-label input[type='checkbox'] {
   width: 1.1rem;
   height: 1.1rem;
   margin: 0;

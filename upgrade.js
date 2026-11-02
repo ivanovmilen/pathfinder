@@ -20,6 +20,8 @@ import {
   getPlatformSupport,
   getPreClusterUpgradeDatabaseFamily,
   getRecommendedTargetDatabaseFamily,
+  REDISGRAPH_END_OF_SUPPORT,
+  isBeyondRedisGraphSupport,
   isInDownloadCenter,
   isK8sPlatform,
   labelForOperatingSystem,
@@ -240,11 +242,24 @@ function buildPreUpgradeStep(selections) {
     }
   }
 
+  // RedisGraph is end-of-life; Redis advises against upgrading beyond 6.4 (see
+  // buildRedisGraphNoticeHtml in results.js). Shown here so it also reaches the PDF.
+  const redisGraphWarningHtml = selections.redisGraph && isBeyondRedisGraphSupport(selections.targetVersion)
+    ? `<section class="warning-panel">
+        <p class="status-copy">
+          <strong>RedisGraph:</strong> Redis advises against upgrading beyond 6.4 unless otherwise
+          requested, and databases that use RedisGraph have had no Redis support since
+          ${REDISGRAPH_END_OF_SUPPORT}. <strong>Contact Redis Support or your TAM before you start.</strong>
+        </p>
+      </section>`
+    : '';
+
   return {
     title: 'Pre-upgrade checks',
     html: `
       <p class="status-copy">Complete these checks before starting the upgrade from
         <strong>${escapeHtml(sourceLabel)}</strong> to <strong>${escapeHtml(targetLabel)}</strong>.</p>
+      ${redisGraphWarningHtml}
       ${k8sVersionWarningHtml}
       <ol class="wizard-step-list">
         <li>
