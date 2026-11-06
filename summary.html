@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Upgrade Summary · Redis Enterprise Upgrade Guide</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="page-shell">
+      <section class="hero">
+        <img
+          class="hero-logo"
+          src="./assets/images/SVG/Redis_Logo_White_RGB.svg"
+          alt="Redis"
+        />
+        <p class="eyebrow">Redis Enterprise upgrade assistant</p>
+        <h1>Upgrade summary</h1>
+      </section>
+
+      <section class="results-view">
+        <section class="card results-hero" aria-labelledby="summary-title">
+          <div>
+            <p class="eyebrow results-eyebrow">All steps</p>
+            <h2 id="summary-title">What this upgrade covered</h2>
+          </div>
+          <div class="results-actions">
+            <button id="back-to-guide" class="secondary-button" type="button">← Back to guide</button>
+          </div>
+        </section>
+
+        <section id="summary-content" class="guide-panel wizard-summary" aria-live="polite"></section>
+      </section>
+    </main>
+
+    <script type="module" src="summary.js"></script>
+  </body>
+</html>

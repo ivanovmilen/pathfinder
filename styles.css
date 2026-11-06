@@ -1010,6 +1010,59 @@ code {
   font-size: 0.88rem;
 }
 
+/* Final summary shown when "Done" is clicked on the last wizard step. */
+.wizard-summary-result {
+  display: grid;
+  gap: 0.6rem;
+  margin: 0 0 1.1rem;
+}
+
+.wizard-summary-result div {
+  display: grid;
+  gap: 0.1rem;
+}
+
+.wizard-summary-result dt {
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--accent-strong);
+}
+
+.wizard-summary-result dd {
+  margin: 0;
+}
+
+.wizard-summary-list {
+  list-style: none;
+  margin: 0 0 1rem;
+  padding: 0;
+  display: grid;
+  gap: 0.55rem;
+}
+
+.wizard-summary-item {
+  display: flex;
+  gap: 0.6rem;
+  align-items: baseline;
+}
+
+.wizard-summary-mark {
+  flex: none;
+  width: 1.1rem;
+  font-weight: 700;
+  color: var(--success);
+}
+
+.wizard-summary-item-skipped {
+  color: var(--muted);
+}
+
+.wizard-summary-item-skipped .wizard-summary-mark {
+  color: var(--muted);
+}
+
 @media (max-width: 860px) {
   .page-shell {
     width: min(100% - 1rem, 1120px);

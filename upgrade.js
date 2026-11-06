@@ -48,6 +48,8 @@ const wizardPrevButton = document.querySelector('#wizard-prev');
 const wizardNextButton = document.querySelector('#wizard-next');
 
 const STORAGE_KEY = 'pathfinder_selections';
+// Read by summary.js: the outcome of every step, written when "Done" is clicked.
+const SUMMARY_STORAGE_KEY = 'pathfinder_summary';
 
 // Render the inline markdown the release notes use (`code` spans and
 // [text](url) links) into safe HTML. Everything is HTML-escaped first, then the
@@ -1549,10 +1551,14 @@ function buildWizardSteps(selections, selectedPath) {
 
   // Pre-upgrade checks apply to the overall upgrade journey
   const steps = [buildPreUpgradeStep(selections)];
+  // Each step carries a `result` line that the wizard's final "Done" summary lists.
+  steps[0].result = 'Pre-upgrade checks completed';
 
   // For Kubernetes platforms, add deployment method selection step
   if (isK8s) {
-    steps.push(buildK8sDeploymentMethodStep(selections));
+    const methodStep = buildK8sDeploymentMethodStep(selections);
+    methodStep.result = 'Kubernetes deployment method selected';
+    steps.push(methodStep);
   }
 
   const moduleNames = getSelectedModuleNames(selections);
@@ -1592,6 +1598,7 @@ function buildWizardSteps(selections, selectedPath) {
         <p class="status-copy">Each database upgrade step below includes specific module upgrade
           instructions and compatible versions for that step.</p>
       `,
+      result: 'Module versions checked for every upgrade stop',
     });
   }
 
@@ -1649,6 +1656,13 @@ function buildWizardSteps(selections, selectedPath) {
       osStep.title = isMultiStep
         ? `Upgrade the operating system (on ${getClusterVersionLabel(osUpgradeOnClusterVersion)})`
         : 'Upgrade the operating system';
+      const osTargets = getOsUpgradeTargetOptions(
+        versionStops.slice(osUpgradeInsertBeforeHop),
+        selections.platform,
+        selections.operatingSystem,
+      ).map((option) => option.label);
+      osStep.result = `Operating system upgraded: ${labelForOperatingSystem(selections.operatingSystem)}`
+        + (osTargets.length ? ` \u2192 ${osTargets.join(' or ')}` : '');
       steps.push(osStep);
     }
 
@@ -1676,6 +1690,8 @@ function buildWizardSteps(selections, selectedPath) {
         preDbStep.title = isMultiStep
           ? `Upgrade the database — required before cluster upgrade${stepLabel}`
           : 'Upgrade the database — required before cluster upgrade';
+        preDbStep.result = `Database upgraded before the cluster: Redis ${getDatabaseVersionFamilyLabel(runningDbFamily)}`
+          + ` \u2192 ${getDatabaseVersionFamilyLabel(preClusterFamily)}`;
         steps.push(preDbStep);
         runningDbFamily = preClusterFamily;
       }
@@ -1688,6 +1704,8 @@ function buildWizardSteps(selections, selectedPath) {
     if (isMultiStep) {
       clusterStep.title = `Upgrade the cluster${stepLabel}`;
     }
+    clusterStep.result = `Cluster upgraded: ${getClusterVersionLabel(stepSource)} \u2192 ${getClusterVersionLabel(stepTarget)}`
+      + (isBridgeHop ? ' (bridge version)' : '');
     steps.push(clusterStep);
 
     // OS compatibility is handled by the pre-hop OS upgrade insertion above —
@@ -1719,6 +1737,8 @@ function buildWizardSteps(selections, selectedPath) {
         postDbStep.title = isMultiStep
           ? `Upgrade the database — recommended${stepLabel}`
           : 'Upgrade the database — recommended';
+        postDbStep.result = `Database upgrade (recommended): Redis ${getDatabaseVersionFamilyLabel(runningDbFamily)}`
+          + ` \u2192 ${getDatabaseVersionFamilyLabel(postDbReq.recommended)}`;
         steps.push(postDbStep);
         // runningDbFamily intentionally NOT bumped — the user may defer.
       }
@@ -1730,6 +1750,7 @@ function buildWizardSteps(selections, selectedPath) {
       if (isMultiStep) {
         dbStep.title = `${dbStep.title}${stepLabel}`;
       }
+      dbStep.result = 'Active-Active databases upgraded on every participating cluster';
       steps.push(dbStep);
     }
   }
@@ -1792,12 +1813,15 @@ function exportPdf(selections, selectedPath, steps) {
   window.print();
 }
 
-function renderWizard(steps) {
+function renderWizard(steps, { selections, selectedPath }) {
   let currentStep = 0;
+  // Steps the user actually opened, so the summary page can tell reviewed from skipped.
+  const visited = new Set();
 
   function renderCurrentStep() {
     const step = steps[currentStep];
     const total = steps.length;
+    visited.add(currentStep);
 
     wizardStepIndicator.textContent = `Step ${currentStep + 1} of ${total}`;
 
@@ -1826,6 +1850,28 @@ function renderWizard(steps) {
     }
   }
 
+  // "Done": hand the outcome of every step, and which ones were opened, to summary.html.
+  function finish() {
+    const summary = {
+      selectedPath: selectedPath && selectedPath.length
+        ? selectedPath
+        : [selections.sourceVersion, selections.targetVersion],
+      databaseVersion: selections.databaseVersion ?? '',
+      targetDatabaseVersion: selections.targetDatabaseVersion ?? '',
+      steps: steps.map((step, i) => ({
+        title: step.title,
+        result: step.result ?? '',
+        reviewed: visited.has(i),
+      })),
+    };
+    try {
+      sessionStorage.setItem(SUMMARY_STORAGE_KEY, JSON.stringify(summary));
+    } catch {
+      // Storage unavailable: the summary page sends the user back to the start.
+    }
+    window.location.href = 'summary.html';
+  }
+
   function leaveCurrentStep() {
     const step = steps[currentStep];
     if (typeof step.onLeave === 'function') {
@@ -1850,7 +1896,7 @@ function renderWizard(steps) {
       wizardEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
     } else {
       leaveCurrentStep();
-      window.scrollTo({ top: 0, behavior: 'smooth' });
+      finish();
     }
   });
 
@@ -1941,7 +1987,7 @@ function initialize() {
     activeSelectedPath = selectedPath;
     activeSteps = buildWizardSteps(selections, selectedPath);
     if (downloadPdfButton) downloadPdfButton.disabled = false;
-    renderWizard(activeSteps);
+    renderWizard(activeSteps, { selections, selectedPath });
   };
 
   if (isDirect || upgradePaths.length <= 1) {
