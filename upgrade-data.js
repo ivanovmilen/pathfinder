@@ -263,7 +263,7 @@ const CLUSTER_END_OF_LIFE_BY_FAMILY = {
 };
 
 // A version is flagged once it is this close to its end-of-life date, or past it.
-const END_OF_LIFE_WARNING_MONTHS = 6;
+const END_OF_LIFE_WARNING_MONTHS = 9;
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 const END_OF_LIFE_DATE_FORMAT = new Intl.DateTimeFormat('en-US', {

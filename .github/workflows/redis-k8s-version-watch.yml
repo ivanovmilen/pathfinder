@@ -184,7 +184,7 @@ jobs:
             echo '- `os`: update `OS_SUPPORT_BY_CLUSTER_VERSION` (and `OPTIONS.operatingSystems` for a new OS) in `upgrade-data.js`.'
             echo '- `release` (a new Redis Software version): add it to `CLUSTER_VERSION_LABELS`, `DOCUMENTED_TARGET_VERSIONS` and `DIRECT_CLUSTER_UPGRADE_PATHS`; the previous latest release becomes a source.'
             echo '- `bundles` / `line-bundles` (a database family a release ships): update `DATABASE_COMPATIBILITY_BY_CLUSTER_VERSION`; for a brand-new family also extend the database-family lists and run `./_parse_ce_breaking_changes.py`.'
-            echo '- `eol` (an end-of-life date): update `CLUSTER_END_OF_LIFE_BY_FAMILY` in `upgrade-data.js`; the app flags a version from 6 months before that date.'
+            echo '- `eol` (an end-of-life date): update `CLUSTER_END_OF_LIFE_BY_FAMILY` in `upgrade-data.js`; the app flags a version from 9 months before that date.'
             echo '- `line` (a new X.Y.x release line): follow its OS and upgrade-path data too; this workflow already tracks the two newest lines.'
           } > report.md
           cp current.txt state/versions.txt
