@@ -114,15 +114,32 @@ jobs:
                   release_lines.append(f'release {m.group(1)}')
                   release_lines += [f'bundles {m.group(1)} {f}' for f in families(cells[-1])]
 
+          # --- Product lifecycle page: the end-of-life date of each Redis Software
+          #     version, e.g. "eol 7.4 November 30, 2026" ("none" until Redis sets a
+          #     date). A moved date shows up as a removed + added pair.
+          eol_lines = []
+          lifecycle = fetch('https://redis.io/docs/latest/operate/rs/installing-upgrading/product-lifecycle/index.html.md')
+          for cells in table_rows(lifecycle):
+              # Schedule rows read "7.4 – February 2024 | November 30, 2026"; the other
+              # tables on the page start with "6.0.x" / "8.2.0" and do not match.
+              m = re.match(r'(\d+\.\d+) [–-] ', re.sub(r'\s+', ' ', cells[0]) + ' ')
+              if not m or len(cells) < 2:
+                  continue
+              date = re.sub(r'\s+', ' ', cells[1]).strip()
+              has_date = bool(re.search(r'\d{4}', date))
+              eol_lines.append('eol %s %s' % (m.group(1), date if has_date else 'none'))
+
           lines = ([f'operator {v}'   for v in operators]
                  + [f'kubernetes {v}' for v in k8s]
                  + [f'openshift {v}'  for v in osh]
                  + sorted(set(os_pairs))
-                 + sorted(set(release_lines)))
+                 + sorted(set(release_lines))
+                 + sorted(set(eol_lines)))
           open('current.txt', 'w').write('\n'.join(lines) + '\n')
           # A silently broken extraction must fail loudly, not report "no change".
           assert operators and k8s and os_pairs, 'extraction produced no versions — page layout changed?'
           assert any(l.startswith('release ') for l in release_lines), 'no releases found in the release-notes indexes'
+          assert eol_lines, 'no end-of-life dates found on the lifecycle page — page layout changed?'
           PY
 
       - name: Compare with previous run
@@ -139,7 +156,7 @@ jobs:
           # it, so every current line of that kind would be reported as new. Seed those
           # lines into the baseline silently; real changes are still reported below.
           seeded=false
-          for kind in release bundles line line-bundles; do
+          for kind in release bundles line line-bundles eol; do
             if ! grep -q "^$kind " state/versions.txt; then
               grep "^$kind " current.txt >> state/versions.txt || true
               seeded=true
@@ -153,7 +170,7 @@ jobs:
             exit 0
           fi
           {
-            echo "Redis version-support pages changed ([K8s distributions](https://redis.io/docs/latest/operate/kubernetes/reference/supported_k8s_distributions/) / [supported platforms](https://redis.io/docs/latest/operate/rs/references/supported-platforms/) / [release notes](https://redis.io/docs/latest/operate/rs/release-notes/)):"
+            echo "Redis version-support pages changed ([K8s distributions](https://redis.io/docs/latest/operate/kubernetes/reference/supported_k8s_distributions/) / [supported platforms](https://redis.io/docs/latest/operate/rs/references/supported-platforms/) / [release notes](https://redis.io/docs/latest/operate/rs/release-notes/) / [product lifecycle](https://redis.io/docs/latest/operate/rs/installing-upgrading/product-lifecycle/)):"
             echo
             if [ -n "$added" ]; then
               echo "### 🆕 Added"; echo '```'; echo "$added"; echo '```'
@@ -167,6 +184,7 @@ jobs:
             echo '- `os`: update `OS_SUPPORT_BY_CLUSTER_VERSION` (and `OPTIONS.operatingSystems` for a new OS) in `upgrade-data.js`.'
             echo '- `release` (a new Redis Software version): add it to `CLUSTER_VERSION_LABELS`, `DOCUMENTED_TARGET_VERSIONS` and `DIRECT_CLUSTER_UPGRADE_PATHS`; the previous latest release becomes a source.'
             echo '- `bundles` / `line-bundles` (a database family a release ships): update `DATABASE_COMPATIBILITY_BY_CLUSTER_VERSION`; for a brand-new family also extend the database-family lists and run `./_parse_ce_breaking_changes.py`.'
+            echo '- `eol` (an end-of-life date): update `CLUSTER_END_OF_LIFE_BY_FAMILY` in `upgrade-data.js`; the app flags a version from 6 months before that date.'
             echo '- `line` (a new X.Y.x release line): follow its OS and upgrade-path data too; this workflow already tracks the two newest lines.'
           } > report.md
           cp current.txt state/versions.txt

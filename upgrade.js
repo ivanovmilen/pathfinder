@@ -13,6 +13,7 @@ import {
   getDatabaseVersionFamily,
   getDatabaseVersionFamilyLabel,
   getClusterVersionLabel,
+  getEndOfLifeNotices,
   getModuleEntries,
   getK8sProductName,
   getModuleLabel,
@@ -242,6 +243,22 @@ function buildPreUpgradeStep(selections) {
     }
   }
 
+  // Redis Software versions at or near end of life (see buildEndOfLifeNoticeHtml in
+  // results.js). Shown here so it also reaches the PDF.
+  const endOfLifeNotices = getEndOfLifeNotices(selections.sourceVersion, selections.targetVersion);
+  const endOfLifeWarningHtml = endOfLifeNotices.length
+    ? `<section class="warning-panel">${endOfLifeNotices.map(({ role, family, status, dateLabel, untilLabel }) => {
+        const subject = role === 'target'
+          ? `The target, Redis Software ${escapeHtml(family)},`
+          : `Redis Software ${escapeHtml(family)}`;
+        const timing = status === 'ended'
+          ? `reached end of life on ${escapeHtml(dateLabel)} and no longer receives security patches, bug fixes or maintenance releases.`
+          : `reaches end of life on ${escapeHtml(dateLabel)} (${escapeHtml(untilLabel)}), after which it no longer receives security patches, bug fixes or maintenance releases.`;
+        const advice = role === 'target' ? ' Consider a newer target version.' : '';
+        return `<p class="status-copy"><strong>End of life:</strong> ${subject} ${timing}${advice}</p>`;
+      }).join('')}</section>`
+    : '';
+
   // RedisGraph is end-of-life; Redis advises against upgrading beyond 6.4 (see
   // buildRedisGraphNoticeHtml in results.js). Shown here so it also reaches the PDF.
   const redisGraphWarningHtml = selections.redisGraph && isBeyondRedisGraphSupport(selections.targetVersion)
@@ -259,6 +276,7 @@ function buildPreUpgradeStep(selections) {
     html: `
       <p class="status-copy">Complete these checks before starting the upgrade from
         <strong>${escapeHtml(sourceLabel)}</strong> to <strong>${escapeHtml(targetLabel)}</strong>.</p>
+      ${endOfLifeWarningHtml}
       ${redisGraphWarningHtml}
       ${k8sVersionWarningHtml}
       <ol class="wizard-step-list">

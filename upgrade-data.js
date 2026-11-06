@@ -132,6 +132,12 @@ const OS_SUPPORT_BY_CLUSTER_VERSION = {
   // Redis's current supported-platforms page does not include a 6.0 row, so this
   // app reuses the documented 6.2 platform families for 6.0 only to avoid
   // leaving the earliest supported upgrade sources completely unvalidated.
+  //
+  // As of November 2026 the page's 6.2, 6.4 and 7.2 columns (all past end-of-life)
+  // list only RHEL 8; the RHEL 7, Ubuntu 16.04/18.04/20.04 and Amazon Linux 1/2
+  // rows were trimmed. Those rows are deliberately kept here: customers upgrading
+  // off an end-of-life version still need to pick the OS they actually run, and
+  // the OS-upgrade step needs in-family targets (Ubuntu 18.04 -> 20.04, not RHEL 8).
   '6.0': ['rhel-8', 'rhel-7', 'ubuntu-18.04', 'ubuntu-16.04', 'amazon-linux-1'],
   '6.2': ['rhel-8', 'rhel-7', 'ubuntu-18.04', 'ubuntu-16.04', 'amazon-linux-1'],
   '6.4': ['rhel-8', 'rhel-7', 'ubuntu-20.04', 'ubuntu-18.04', 'ubuntu-16.04', 'amazon-linux-2', 'amazon-linux-1'],
@@ -235,6 +241,81 @@ export function isBeyondRedisGraphSupport(clusterVersion) {
   const limit = CLUSTER_FAMILY_ORDER.indexOf(REDISGRAPH_LAST_ADVISED_FAMILY);
   const index = CLUSTER_FAMILY_ORDER.indexOf(getClusterVersionFamily(clusterVersion));
   return index > limit;
+}
+
+// End-of-life dates for Redis Software cluster versions, from the "Cluster version
+// end-of-life schedule" table at
+// https://redis.io/docs/latest/operate/rs/installing-upgrading/product-lifecycle#endoflife-schedule
+// A date is the last day of support: after it a version no longer receives security
+// patches, bug fixes or maintenance releases. Keyed by version family, so 6.2.x and
+// 8.0.x patches share their family's date. 8.2 has no date yet (Redis sets it after the
+// next major release), so it is left out. The watcher workflow reports changes to this
+// table as `eol` lines.
+const CLUSTER_END_OF_LIFE_BY_FAMILY = {
+  '6.0': '2022-05-31',
+  '6.2': '2025-02-28',
+  '6.4': '2025-08-31',
+  '7.2': '2026-02-28',
+  '7.4': '2026-11-30',
+  '7.8': '2027-05-30',
+  '7.22': '2027-10-30',
+  '8.0': '2028-07-31',
+};
+
+// A version is flagged once it is this close to its end-of-life date, or past it.
+const END_OF_LIFE_WARNING_MONTHS = 6;
+
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+const END_OF_LIFE_DATE_FORMAT = new Intl.DateTimeFormat('en-US', {
+  year: 'numeric',
+  month: 'long',
+  day: 'numeric',
+  timeZone: 'UTC',
+});
+
+function describeDaysUntil(days) {
+  if (days <= 0) return 'today';
+  if (days === 1) return 'tomorrow';
+  if (days <= 60) return `in ${days} days`;
+  return `in about ${Math.round(days / 30)} months`;
+}
+
+// End-of-life status of a cluster version, or null when there is nothing to flag (no
+// date published, or the date is further away than END_OF_LIFE_WARNING_MONTHS).
+// `status` is 'ended' once the date has passed and 'upcoming' until then. Dates are
+// compared as UTC calendar days against the visitor's clock, so a version flips to
+// 'ended' on its own with no redeploy; `today` is a parameter so that can be tested.
+export function getClusterEndOfLife(clusterVersion, today = new Date()) {
+  const family = getClusterVersionFamily(clusterVersion);
+  const isoDate = CLUSTER_END_OF_LIFE_BY_FAMILY[family];
+  if (!isoDate) return null;
+
+  const endDate = new Date(`${isoDate}T00:00:00Z`);
+  const todayUtc = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate());
+  const warnFrom = new Date(todayUtc);
+  warnFrom.setUTCMonth(warnFrom.getUTCMonth() + END_OF_LIFE_WARNING_MONTHS);
+  if (endDate > warnFrom) return null;
+
+  const daysLeft = Math.round((endDate.getTime() - todayUtc) / MS_PER_DAY);
+  return {
+    family,
+    status: daysLeft < 0 ? 'ended' : 'upcoming',
+    dateLabel: END_OF_LIFE_DATE_FORMAT.format(endDate),
+    untilLabel: daysLeft < 0 ? '' : describeDaysUntil(daysLeft),
+  };
+}
+
+// End-of-life notices for an upgrade: one for the user's current version and one for
+// the target when that is an old release too (the form still offers 6.4, 7.2 and 7.4
+// as targets). Each page words them itself; this only decides which apply. The target
+// is skipped when it is in the same family as the source, so one version never gets two.
+export function getEndOfLifeNotices(sourceVersion, targetVersion, today = new Date()) {
+  const source = getClusterEndOfLife(sourceVersion, today);
+  const target = getClusterEndOfLife(targetVersion, today);
+  const notices = [];
+  if (source) notices.push({ role: 'source', ...source });
+  if (target && target.family !== source?.family) notices.push({ role: 'target', ...target });
+  return notices;
 }
 
 // What to call the version the user picked for their platform. OpenShift uses its
@@ -346,6 +427,9 @@ export const OS_UPGRADE_DOC_URL =
 
 export const ACTIVE_ACTIVE_UPGRADE_DOC_URL =
   'https://redis.io/docs/latest/operate/rs/installing-upgrading/upgrading/upgrade-active-active/';
+
+export const PRODUCT_LIFECYCLE_DOC_URL =
+  'https://redis.io/docs/latest/operate/rs/installing-upgrading/product-lifecycle#endoflife-schedule';
 
 export function getClusterVersionLabel(version) {
   return CLUSTER_VERSION_LABELS[version] ?? version;

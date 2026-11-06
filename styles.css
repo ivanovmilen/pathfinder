@@ -356,6 +356,12 @@ h1 {
   color: var(--accent-strong);
 }
 
+.field-eol-hint {
+  margin: 0.45rem 0 0;
+  font-size: 0.82rem;
+  color: var(--warning);
+}
+
 .field-command,
 .field-example {
   font-family: 'Space Mono', monospace;

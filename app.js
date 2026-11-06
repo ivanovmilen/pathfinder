@@ -2,6 +2,7 @@ import {
   OPTIONS,
   canClusterHaveRedisGraph,
   escapeHtml,
+  getClusterEndOfLife,
   getClusterVersionFamily,
   getDatabaseCompatibility,
   getDatabaseVersionFamily,
@@ -37,6 +38,7 @@ const formControls = {
 
 const k8sDistributionFieldWrapper = document.querySelector('#k8s-distribution-field');
 const redisGraphFieldWrapper = document.querySelector('#redis-graph-field');
+const sourceEndOfLifeHint = document.querySelector('#source-version-eol');
 const k8sVersionFieldWrapper = document.querySelector('#k8s-version-field');
 const k8sVersionLabelElement = document.querySelector('label[for="k8s-version"]');
 
@@ -368,6 +370,20 @@ function syncRedisGraphField() {
   }
 }
 
+// One line under "Current version" when that release is past, or close to, its
+// end-of-life date. The results page and the wizard carry the full notice.
+function syncSourceEndOfLifeHint() {
+  if (!sourceEndOfLifeHint) return;
+  const endOfLife = getClusterEndOfLife(formControls.sourceVersion.value);
+  sourceEndOfLifeHint.hidden = !endOfLife;
+  if (!endOfLife) {
+    sourceEndOfLifeHint.textContent = '';
+    return;
+  }
+  const verb = endOfLife.status === 'ended' ? 'reached' : 'reaches';
+  sourceEndOfLifeHint.textContent = `${endOfLife.family} ${verb} end of life on ${endOfLife.dateLabel}.`;
+}
+
 function syncSourceAwareOptions() {
   syncTargetVersionOptions();
   syncDatabaseVersionOptions();
@@ -376,6 +392,7 @@ function syncSourceAwareOptions() {
   syncModuleOptions();
   syncK8sVersionOptions();
   syncRedisGraphField();
+  syncSourceEndOfLifeHint();
 }
 
 function getSelections() {

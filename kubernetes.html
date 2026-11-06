@@ -40,6 +40,7 @@
               </button>
             </div>
             <select id="source-version"></select>
+            <p id="source-version-eol" class="field-eol-hint" hidden></p>
             <aside id="source-version-help" class="field-help-panel" hidden>
               Check the current cluster version with <a href="https://redis.io/docs/latest/operate/rs/references/cli-utilities/rladmin/status/" target="_blank" rel="noreferrer">rladmin status</a> or <a href="https://redis.io/docs/latest/operate/rs/references/rest-api/" target="_blank" rel="noreferrer">REST API</a>
               <code class="field-command">curl -k -u &lt;user&gt;:&lt;password&gt; https://&lt;cluster-host&gt;:9443/v1/nodes | jq -r '.[0].software_version'</code>

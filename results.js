@@ -14,11 +14,13 @@ import {
   getModuleEntries,
   getModuleLabel,
   getModuleSelectionSummary,
+  getEndOfLifeNotices,
   getModulesForDatabaseFamily,
   getPlatformSupport,
   getOsUpgradeTargetOptions,
   getPreClusterUpgradeDatabaseFamily,
   isInDownloadCenter,
+  PRODUCT_LIFECYCLE_DOC_URL,
   REDISGRAPH_END_OF_SUPPORT,
   isBeyondRedisGraphSupport,
   isK8sPlatform,
@@ -364,6 +366,48 @@ function buildRedisGraphNoticeHtml(selections, targetLabel) {
   `;
 }
 
+// Notice for a Redis Software version that has reached, or is close to, end of life
+// (see getEndOfLifeNotices in upgrade-data.js). It covers the user's current version
+// and, when the target is an old release too, the target. Advisory only — the plan is
+// still shown.
+function buildEndOfLifeNoticeHtml(selections, targetLabel) {
+  const lifecycleLink = `<a href="${PRODUCT_LIFECYCLE_DOC_URL}" target="_blank" rel="noreferrer">Redis Software product lifecycle</a>`;
+  const fixes = 'security patches, bug fixes or maintenance releases';
+
+  return getEndOfLifeNotices(selections.sourceVersion, selections.targetVersion)
+    .map(({ role, family, status, dateLabel, untilLabel }) => {
+      const version = escapeHtml(family);
+      const date = escapeHtml(dateLabel);
+      const ended = status === 'ended';
+      const verb = ended ? 'has reached' : 'reaches';
+      const when = ended ? '' : ` on ${date}`;
+
+      let title;
+      let body;
+      if (role === 'target') {
+        title = `The target, Redis Software ${version}, ${verb} end of life${when}`;
+        body = ended
+          ? `Redis ended support for Redis Software ${version} on <strong>${date}</strong>, so this upgrade lands on a version that no longer receives ${fixes}.`
+          : `That is ${escapeHtml(untilLabel)}. After that date, ${version}.x clusters no longer receive ${fixes}.`;
+        body += ' Consider choosing a newer target version that is still supported.';
+      } else {
+        title = `Redis Software ${version} ${verb} end of life${when}`;
+        body = ended
+          ? `Redis ended support for Redis Software ${version} on <strong>${date}</strong>. It no longer receives ${fixes}, and support for ${version}-specific issues is limited under your subscription agreement &mdash; you may be asked to upgrade before an issue can be investigated.`
+          : `That is ${escapeHtml(untilLabel)}. After that date, ${version}.x clusters no longer receive ${fixes}, and support for ${version}-specific issues is limited under your subscription agreement.`;
+        body += ` This plan moves you to <strong>${escapeHtml(targetLabel)}</strong>.`;
+      }
+
+      return `
+        <section class="warning-panel">
+          <h3>${title}</h3>
+          <p class="status-copy">${body} See the ${lifecycleLink}.</p>
+        </section>
+      `;
+    })
+    .join('');
+}
+
 function renderProcessSummary(selections, upgradePaths, osUpgradeRequired, isDirect) {
   if (!processSummary || !upgradePaths.length) return;
 
@@ -565,6 +609,7 @@ function renderUpgradePathResult(selections) {
       } catch {
         // Storage failure is non-fatal; the wizard will rebuild paths on load.
       }
+      guideOutput.innerHTML += buildEndOfLifeNoticeHtml(selections, targetLabel);
       guideOutput.innerHTML += buildRedisGraphNoticeHtml(selections, targetLabel);
       renderProcessSummary(selections, upgradePaths, indirectOsUpgradeRequired, false);
       return { feasible: true, osUpgradeRequired: indirectOsUpgradeRequired, indirect: true };
@@ -668,6 +713,7 @@ function renderUpgradePathResult(selections) {
       </section>
     `
     : '';
+  guideOutput.innerHTML += buildEndOfLifeNoticeHtml(selections, targetLabel);
   guideOutput.innerHTML += buildRedisGraphNoticeHtml(selections, targetLabel);
 
   // Store direct path info for the upgrade wizard.
