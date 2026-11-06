@@ -247,13 +247,13 @@ function buildPreUpgradeStep(selections) {
   // results.js). Shown here so it also reaches the PDF.
   const endOfLifeNotices = getEndOfLifeNotices(selections.sourceVersion, selections.targetVersion);
   const endOfLifeWarningHtml = endOfLifeNotices.length
-    ? `<section class="warning-panel">${endOfLifeNotices.map(({ role, family, status, dateLabel, untilLabel }) => {
+    ? `<section class="warning-panel">${endOfLifeNotices.map(({ role, family, status, dateLabel }) => {
         const subject = role === 'target'
           ? `The target, Redis Software ${escapeHtml(family)},`
           : `Redis Software ${escapeHtml(family)}`;
         const timing = status === 'ended'
           ? `reached end of life on ${escapeHtml(dateLabel)} and no longer receives security patches, bug fixes or maintenance releases.`
-          : `reaches end of life on ${escapeHtml(dateLabel)} (${escapeHtml(untilLabel)}), after which it no longer receives security patches, bug fixes or maintenance releases.`;
+          : `reaches end of life on ${escapeHtml(dateLabel)}, after which it no longer receives security patches, bug fixes or maintenance releases.`;
         const advice = role === 'target' ? ' Consider a newer target version.' : '';
         return `<p class="status-copy"><strong>End of life:</strong> ${subject} ${timing}${advice}</p>`;
       }).join('')}</section>`

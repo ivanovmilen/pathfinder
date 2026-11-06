@@ -273,13 +273,6 @@ const END_OF_LIFE_DATE_FORMAT = new Intl.DateTimeFormat('en-US', {
   timeZone: 'UTC',
 });
 
-function describeDaysUntil(days) {
-  if (days <= 0) return 'today';
-  if (days === 1) return 'tomorrow';
-  if (days <= 60) return `in ${days} days`;
-  return `in about ${Math.round(days / 30)} months`;
-}
-
 // End-of-life status of a cluster version, or null when there is nothing to flag (no
 // date published, or the date is further away than END_OF_LIFE_WARNING_MONTHS).
 // `status` is 'ended' once the date has passed and 'upcoming' until then. Dates are
@@ -301,7 +294,6 @@ export function getClusterEndOfLife(clusterVersion, today = new Date()) {
     family,
     status: daysLeft < 0 ? 'ended' : 'upcoming',
     dateLabel: END_OF_LIFE_DATE_FORMAT.format(endDate),
-    untilLabel: daysLeft < 0 ? '' : describeDaysUntil(daysLeft),
   };
 }
 
